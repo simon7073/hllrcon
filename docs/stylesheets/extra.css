@@ -1,0 +1,4 @@
+/* 示例：调整代码块字体 */
+code {
+  font-feature-settings: "liga" 1;
+}
