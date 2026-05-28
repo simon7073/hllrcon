@@ -208,10 +208,8 @@ class SyncRcon(SyncRconCommands):
         when the response arrives.
 
         """
-        self.wait_until_connected()
         return self._run_coroutine(
             self._rcon.execute(command, version, body),
-            block=False,
         )
 
     @override
@@ -231,8 +229,6 @@ class SyncRcon(SyncRconCommands):
     def _run_coroutine(
         self,
         coro: Any,
-        *,
-        block: bool = True,
     ) -> Future[str]:
         """Marshal *coro* to the background loop.
 
@@ -240,17 +236,16 @@ class SyncRcon(SyncRconCommands):
         ----------
         coro :
             The awaitable to run.
-        block :
-            If ``True`` this method returns the raw
-            :class:`concurrent.futures.Future` and the caller must call
-            ``.result()``.
+
+        Returns
+        -------
+        Future[str]
+            A future that resolves when *coro* completes on the background loop.
+            The caller must call ``.result()`` to block for the result.
 
         """
         if self._loop is None or not self._loop.is_running():
             msg = "Background event loop is not running"
             raise RuntimeError(msg)
 
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        if block:
-            return future
-        return future
+        return asyncio.run_coroutine_threadsafe(coro, self._loop)

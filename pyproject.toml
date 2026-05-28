@@ -29,8 +29,8 @@ dependencies = [
 
 [project.urls]
 # Documentation = "https://hllrcon.readthedocs.io/en/latest/index.html"
-Repository = "https://github.com/timraay/hllrcon"
-Issues = "https://github.com/timraay/hllrcon/issues"
+Repository = "https://github.com/simon7073/hllrcon"
+Issues = "https://github.com/simon7073/hllrcon/issues"
 # Changelog = "https://hllrcon.readthedocs.io/en/latest/changelog.html"
 
 [build-system]
