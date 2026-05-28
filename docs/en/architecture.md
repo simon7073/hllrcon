@@ -1,47 +1,47 @@
-# hllrcon 架构说明文档
+# hllrcon Architecture Documentation
 
-> 最后更新日期：2026-05-28
-
----
-
-## 1. 项目概述
-
-### 1.1 项目背景
-
-`hllrcon` 是 [Hell Let Loose](https://www.hellletloose.com/game/hll) 游戏 RCONv2 协议的异步 Python 实现。它允许开发者以编程方式与 HLL 游戏服务器交互，执行管理员命令（踢人、封禁、换图、广播等）、查询玩家与服务器状态，并提供丰富的游戏内元数据（地图、阵营、武器、载具等）。
-
-### 1.2 技术栈选型依据
-
-| 技术 | 选型依据 |
-|------|---------|
-| **Python 3.11+** | 充分利用原生 `asyncio`、`typing` 改进与性能优化；库的现代基线。 |
-| **Pydantic v2** | 强类型响应模型与数据校验；RCON 返回的 JSON 可直接反序列化为结构化对象。 |
-| **typing-extensions** | 兼容高版本类型特性（如 `@override`），确保类型系统表达力。 |
-| **asyncio.Protocol** | 底层直接基于 `asyncio.Transport` 实现 TCP 协议，避免引入外部网络库，保持轻量。 |
-| **uv / hatchling** | 现代 Python 打包与依赖管理；`pyproject.toml` 为单一配置源。 |
-| **pytest + pytest-asyncio** | 单元测试与异步测试标准方案；覆盖率要求 100%。 |
-| **ruff + mypy** | 统一 lint、format 与静态类型检查，保证代码风格一致。 |
+> Last updated: 2026-05-28
 
 ---
 
-## 2. 代码组织与目录结构
+## 1. Project Overview
+
+### 1.1 Background
+
+`hllrcon` is an asynchronous Python implementation of the [Hell Let Loose](https://www.hellletloose.com/game/hll) RCONv2 protocol. It allows developers to interact with HLL game servers programmatically, executing admin commands (kick, ban, change map, broadcast, etc.), querying player and server status, and providing rich in-game metadata (maps, factions, weapons, vehicles, etc.).
+
+### 1.2 Technology Stack Rationale
+
+| Technology | Rationale |
+|-----------|-----------|
+| **Python 3.11+** | Full use of native `asyncio`, `typing` improvements and performance optimizations; modern baseline for the library. |
+| **Pydantic v2** | Strongly-typed response models and data validation; RCON-returned JSON can be directly deserialized into structured objects. |
+| **typing-extensions** | Compatibility with high-version type features (e.g. `@override`), ensuring type system expressiveness. |
+| **asyncio.Protocol** | Directly based on `asyncio.Transport` for TCP protocol implementation, avoiding external networking libraries, keeping it lightweight. |
+| **uv / hatchling** | Modern Python packaging and dependency management; `pyproject.toml` as the single source of configuration. |
+| **pytest + pytest-asyncio** | Standard solution for unit and async testing; 100% coverage requirement. |
+| **ruff + mypy** | Unified lint, format and static type checking, ensuring consistent code style. |
+
+---
+
+## 2. Code Organization and Directory Structure
 
 ```text
 hllrcon/
-├── __init__.py          # 包入口：聚合对外暴露的公共 API
-├── client.py            # RconClient 抽象基类，定义连接生命周期契约
-├── connection.py        # RconConnection：单连接封装，直接暴露命令调用
-├── rcon.py              # Rcon：自动重连客户端，对多协程并发安全
-├── commands.py          # RconCommands：所有 RCON 命令的高层封装
-├── responses.py         # Pydantic 响应模型（玩家信息、服务器配置、封禁列表等）
-├── exceptions.py        # 异常层次体系（连接/协议/命令/消息错误）
-├── py.typed             # PEP 561 标记，表示包携带类型信息
-├── data/                # 游戏静态数据（地图、阵营、武器、载具、据点等）
+├── __init__.py          # Package entry: aggregates publicly exposed APIs
+├── client.py            # RconClient abstract base class, defines connection lifecycle contract
+├── connection.py        # RconConnection: single-connection wrapper, directly exposes command calls
+├── rcon.py              # Rcon: auto-reconnecting client, safe for multi-coroutine concurrency
+├── commands.py          # RconCommands: high-level wrappers for all RCON commands
+├── responses.py         # Pydantic response models (player info, server config, ban lists, etc.)
+├── exceptions.py        # Exception hierarchy (connection/protocol/command/message errors)
+├── py.typed             # PEP 561 marker, indicating the package carries type information
+├── data/                # Game static data (maps, factions, weapons, vehicles, strongpoints, etc.)
 │   ├── __init__.py
-│   ├── _utils.py        # IndexedBaseModel / CaseInsensitiveIndexedBaseModel 基类
+│   ├── _utils.py        # IndexedBaseModel / CaseInsensitiveIndexedBaseModel base classes
 │   ├── factions.py
 │   ├── game_modes.py
-│   ├── layers.py        # Layer 定义，含据点、坐标、环境信息
+│   ├── layers.py        # Layer definitions, including strongpoints, coordinates, environment info
 │   ├── loadouts.py
 │   ├── maps.py
 │   ├── roles.py
@@ -49,110 +49,110 @@ hllrcon/
 │   ├── teams.py
 │   ├── vehicles.py
 │   └── weapons.py
-├── protocol/            # RCONv2 协议实现
+├── protocol/            # RCONv2 protocol implementation
 │   ├── __init__.py
-│   ├── constants.py     # 协议魔数、头部长度、最大负载、超时默认值
-│   ├── protocol.py      # RconProtocol：asyncio.Protocol 子类，核心收发逻辑
-│   ├── request.py       # RconRequest：请求打包（JSON + struct header）
-│   └── response.py      # RconResponse / RconResponseStatus：响应解析
-└── sync/                # 同步兼容层
+│   ├── constants.py     # Protocol magic numbers, header size, max payload, default timeouts
+│   ├── protocol.py      # RconProtocol: asyncio.Protocol subclass, core send/receive logic
+│   ├── request.py       # RconRequest: request packing (JSON + struct header)
+│   └── response.py      # RconResponse / RconResponseStatus: response parsing
+└── sync/                # Synchronous compatibility layer
     ├── __init__.py
-    ├── commands.py      # 由脚本自动生成，SyncRconCommands（同步版命令封装）
-    └── rcon.py          # SyncRcon：在后台线程运行事件循环的同步客户端
+    ├── commands.py      # Auto-generated by script, SyncRconCommands (synchronous command wrappers)
+    └── rcon.py          # SyncRcon: synchronous client running event loop in background thread
 
-scripts/                 # 开发工具脚本
+scripts/                 # Development utility scripts
 ├── export_data.py
 ├── extract_loadouts.py
 ├── extract_strongpoints.py
 ├── generate_command_schema.py
-└── generate_sync_commands.py  # 依据 hllrcon/commands.py 自动生成 sync/commands.py
+└── generate_sync_commands.py  # Auto-generates sync/commands.py based on hllrcon/commands.py
 
-tests/                   # 测试套件
-├── test_*.py            # 单元测试（协议、连接、命令、数据模型等）
-└── integration_tests/   # 集成测试（需真实 HLL 服务器环境变量）
+tests/                   # Test suite
+├── test_*.py            # Unit tests (protocol, connection, commands, data models, etc.)
+└── integration_tests/   # Integration tests (requires real HLL server environment variables)
 ```
 
 ---
 
-## 3. 模块架构与核心职责
+## 3. Module Architecture and Core Responsibilities
 
-### 3.1 protocol 层 — 二进制协议引擎
+### 3.1 Protocol Layer — Binary Protocol Engine
 
-`protocol` 是库的最低层，直接负责 TCP 上的 RCONv2 字节流通信。
+`protocol` is the lowest layer of the library, directly responsible for RCONv2 byte stream communication over TCP.
 
-- **数据包格式**：每包 12 字节头部（`magic[4] + request_id[4] + payload_len[4]`，小端）+ JSON 载荷。
-- **加密**：握手后服务器下发 XOR key，后续载荷通过 XOR 加解密。
-- **状态机**：`ProtocolState` 枚举管理连接生命周期（DISCONNECTED → CONNECTING → CONNECTED → AUTHENTICATING → AUTHENTICATED → CLOSING → CLOSED）。
-- **请求关联**：`RconRequest` 使用进程级自增 ID（线程锁保护）将请求与响应对齐；等待者以 `asyncio.Future` 存储于 `_waiters` 字典。
-- **防御机制**：
-  - 粘包处理：`bytearray` 缓冲区循环读取，支持头部错位恢复。
-  - 反 DoS：`MAX_PAYLOAD_SIZE = 16 MiB`，超限直接丢弃头部。
-  - TCP keepalive + 可选应用层 heartbeat。
+- **Packet format**: 12-byte header per packet (`magic[4] + request_id[4] + payload_len[4]`, little-endian) + JSON payload.
+- **Encryption**: After handshake, the server sends an XOR key; subsequent payloads are encrypted/decrypted via XOR.
+- **State machine**: `ProtocolState` enum manages connection lifecycle (DISCONNECTED → CONNECTING → CONNECTED → AUTHENTICATING → AUTHENTICATED → CLOSING → CLOSED).
+- **Request correlation**: `RconRequest` uses a process-wide incrementing ID (thread-lock protected) to align requests with responses; waiters are stored in `_waiters` dict as `asyncio.Future`.
+- **Defensive mechanisms**:
+  - Sticky packet handling: `bytearray` buffer loops for reads, supports header misalignment recovery.
+  - Anti-DoS: `MAX_PAYLOAD_SIZE = 16 MiB`, exceeding this directly drops the header.
+  - TCP keepalive + optional application-layer heartbeat.
 
-> 你通常**不应**直接使用 `RconProtocol`，而是使用上层的 `RconConnection` 或 `Rcon`。
+> You typically **should not** use `RconProtocol` directly; instead use the higher-level `RconConnection` or `Rcon`.
 
-### 3.2 connection 层 — 单连接管理
+### 3.2 Connection Layer — Single Connection Management
 
-`RconConnection` 是一次性连接封装：
+`RconConnection` is a one-time connection wrapper:
 
-- 持有 `RconProtocol` 实例，转发 `execute()` 调用。
-- 在连接丢失时抛出 `HLLConnectionLostError`。
-- 断开即废弃，不可复用。
-- 暴露 `on_disconnect` 回调供上层（如 `Rcon`）监听。
+- Holds a `RconProtocol` instance, forwards `execute()` calls.
+- Throws `HLLConnectionLostError` when connection is lost.
+- Discarded after disconnect, not reusable.
+- Exposes `on_disconnect` callback for upper layers (e.g. `Rcon`) to listen.
 
-### 3.3 rcon 层 — 自动重连与并发安全
+### 3.3 Rcon Layer — Auto-reconnect and Concurrency Safety
 
-`Rcon` 是面向生产环境的主力客户端：
+`Rcon` is the main production client:
 
-- **自动重连**：`reconnect_after_failures` 控制连续失败多少次后主动拆链重建（`0` 则禁用）。
-- **并发安全**：`asyncio.Lock` + `asyncio.Future` 实现“单协程建连、多协程等待共享结果”。
-- **失败计数器**：`TimeoutError` / `OSError` / `HLLConnectionError` 会累加 `_failure_count`，成功则清零。
-- **上下文管理器**：`async with rcon.connect(): ...` 保证连接退出时断开。
+- **Auto-reconnect**: `reconnect_after_failures` controls how many consecutive failures before actively tearing down and rebuilding the connection (`0` disables).
+- **Concurrency safety**: `asyncio.Lock` + `asyncio.Future` implements "single coroutine establishes connection, multiple coroutines wait for shared result".
+- **Failure counter**: `TimeoutError` / `OSError` / `HLLConnectionError` increment `_failure_count`, success resets it.
+- **Context manager**: `async with rcon.connect(): ...` guarantees disconnect on exit.
 
-### 3.4 commands 层 — 命令 DSL
+### 3.4 Commands Layer — Command DSL
 
-`RconCommands` 定义了所有 RCON 命令的 Python 方法（约 50+ 个）。关键设计：
+`RconCommands` defines all RCON command Python methods (~50+). Key designs:
 
-- **抽象 `execute` 方法**：子类/混入层只需实现 `execute(command, version, body)`，无需关心网络。
-- **装饰器转换**：
-  - `@cast_response_to_model(Model)`：将 JSON 字符串自动反序列化为 Pydantic 模型。
-  - `@cast_response_to_model(Model, lambda r: r.field)`：提取嵌套字段。
-  - `@cast_response_to_bool({400})`：将特定状态码的命令异常转化为 `False`。
-- **命令参数**：大多数命令使用 API version `2`，body 为 JSON 对象或空字符串。
+- **Abstract `execute` method**: Subclasses/mixins only need to implement `execute(command, version, body)`, no need to care about networking.
+- **Decorator transformations**:
+  - `@cast_response_to_model(Model)`: Automatically deserializes JSON string into Pydantic model.
+  - `@cast_response_to_model(Model, lambda r: r.field)`: Extracts nested field.
+  - `@cast_response_to_bool({400})`: Converts command exceptions with specific status codes to `False`.
+- **Command parameters**: Most commands use API version `2`, body is JSON object or empty string.
 
-### 3.5 responses 层 — 类型化响应模型
+### 3.5 Responses Layer — Typed Response Models
 
-所有响应继承自 `Response(BaseModel)`，使用 `to_camel` 别名生成器兼容服务端驼峰字段。核心模型：
+All responses inherit from `Response(BaseModel)`, using `to_camel` alias generator to be compatible with server-side camelCase fields. Core models:
 
-- `GetPlayerResponse` / `GetPlayersResponse`：玩家实时数据（坐标、击杀、阵营、兵种等）。
-- `GetServerSessionResponse`：当前对局状态（比分、剩余时间、人数）。
-- `GetMapRotationResponse`：地图轮换/队列。
-- `GetBansResponse`：封禁列表。
+- `GetPlayerResponse` / `GetPlayersResponse`: Player real-time data (coordinates, kills, faction, role, etc.).
+- `GetServerSessionResponse`: Current match status (score, remaining time, player count).
+- `GetMapRotationResponse`: Map rotation/queue.
+- `GetBansResponse`: Ban list.
 
-### 3.6 data 层 — 游戏静态元数据
+### 3.6 Data Layer — Game Static Metadata
 
-提供无需网络即可访问的游戏知识库：
+Provides game knowledge base accessible without network:
 
-- `Layer`：地图层（地图 + 游戏模式 + 时间/天气 + 据点布局）。约 150+ 个类缓存属性定义所有官方 layer。
-- `Map`、`Faction`、`Weapon`、`Vehicle`、`Role`、`GameMode` 等：均为 `IndexedBaseModel` 子类，支持 `by_id()` 全局查找。
-- **索引基类**：`IndexedBaseModel` 在 `model_post_init` 时自动注册实例到类级 `_lookup_map`，实现 O(1) 查找；`CaseInsensitiveIndexedBaseModel` 用于大小写不敏感 ID（如 Layer）。
-- `sectors.py`：定义据点（Strongpoint）、占领区（CaptureZone）与坐标网格（Grid），支持 `is_inside()` 判定玩家位置。
+- `Layer`: Map layers (map + game mode + time/weather + strongpoint layout). ~150+ class cached properties define all official layers.
+- `Map`, `Faction`, `Weapon`, `Vehicle`, `Role`, `GameMode`, etc.: All are `IndexedBaseModel` subclasses, supporting `by_id()` global lookup.
+- **Index base class**: `IndexedBaseModel` automatically registers instances to class-level `_lookup_map` in `model_post_init`, enabling O(1) lookup; `CaseInsensitiveIndexedBaseModel` for case-insensitive IDs (e.g. Layer).
+- `sectors.py`: Defines strongpoints, capture zones (CaptureZone) and coordinate grids (Grid), supports `is_inside()` player position determination.
 
-### 3.7 sync 层 — 同步桥接
+### 3.7 Sync Layer — Synchronous Bridge
 
-`SyncRcon` 为同步代码提供阻塞式 API：
+`SyncRcon` provides blocking API for synchronous code:
 
-- 内部启动一个 daemon 线程运行独立 `asyncio` 事件循环。
-- 通过 `asyncio.run_coroutine_threadsafe` 将同步调用转译为异步执行。
-- `SyncRconCommands` 由 `scripts/generate_sync_commands.py` **自动生成**，保持与异步命令层 API 一致。
+- Internally starts a daemon thread running an independent `asyncio` event loop.
+- Translates synchronous calls to async execution via `asyncio.run_coroutine_threadsafe`.
+- `SyncRconCommands` is **auto-generated** by `scripts/generate_sync_commands.py`, maintaining API consistency with the async command layer.
 
 ---
 
-## 4. 模块间依赖关系
+## 4. Module Dependencies
 
 ```mermaid
 graph TD
-    subgraph 公共API
+    subgraph Public API
         A[hllrcon.Rcon]
         B[hllrcon.SyncRcon]
     end
@@ -180,155 +180,155 @@ graph TD
     style J fill:#bfb,stroke:#333
 ```
 
-**接口契约**：
+**Interface contracts**:
 
-| 接口 | 输入 | 输出 | 约束 |
-|------|------|------|------|
-| `RconProtocol.execute` | `command: str`, `version: int`, `content_body: dict/str` | `RconResponse` | 必须在已连接状态下调用；超时抛出 `TimeoutError`。 |
-| `RconConnection.execute` | 同上 | `str` (body) | 包装 `protocol.execute` 并调用 `raise_for_status()`。 |
-| `Rcon.execute` | 同上 | `str` (body) | 自动获取/重建连接；对 `TimeoutError`/`OSError` 计数。 |
-| `RconCommands.execute` | 同上 | `str` (body) | 抽象方法；由 `RconConnection` 或 `Rcon` 实现。 |
-| `SyncRcon.execute` | 同上 | `str` (body) | 同步阻塞；内部转交后台事件循环。 |
+| Interface | Input | Output | Constraints |
+|-----------|-------|--------|-------------|
+| `RconProtocol.execute` | `command: str`, `version: int`, `content_body: dict/str` | `RconResponse` | Must be called in connected state; throws `TimeoutError` on timeout. |
+| `RconConnection.execute` | Same as above | `str` (body) | Wraps `protocol.execute` and calls `raise_for_status()`. |
+| `Rcon.execute` | Same as above | `str` (body) | Auto acquires/rebuilds connection; counts `TimeoutError`/`OSError`. |
+| `RconCommands.execute` | Same as above | `str` (body) | Abstract method; implemented by `RconConnection` or `Rcon`. |
+| `SyncRcon.execute` | Same as above | `str` (body) | Synchronous blocking; internally delegates to background event loop. |
 
 ---
 
-## 5. 关键数据流向
+## 5. Key Data Flows
 
-### 5.1 请求-响应完整生命周期
+### 5.1 Request-Response Full Lifecycle
 
 ```
-调用方
+Caller
   │  await rcon.get_players()
   ▼
-RconCommands.get_players            # 组装命令名 + version + body
+RconCommands.get_players            # Assemble command name + version + body
   │  await self.execute("GetServerInformation", 2, {"Name":"players","Value":""})
   ▼
 Rcon.execute / RconConnection.execute
   │  protocol.execute(...)
   ▼
 RconProtocol.execute
-  │  1. 构造 RconRequest → pack() → header + xor(body)
+  │  1. Construct RconRequest → pack() → header + xor(body)
   │  2. transport.write(message)
-  │  3. 注册 waiter Future
+  │  3. Register waiter Future
   │  4. await asyncio.wait_for(waiter, timeout)
   ▼
-服务器返回 TCP 数据
+Server returns TCP data
   │
 RconProtocol.data_received ──► _buffer.extend(data)
   │                            _read_from_buffer()
-  │                              1. 校验 magic / 长度
-  │                              2. xor 解密
+  │                              1. Validate magic / length
+  │                              2. XOR decrypt
   │                              3. RconResponse.unpack()
   │                              4. waiter.set_result(pkt)
   ▼
-Future 完成，结果沿调用栈返回
+Future completes, result returns up the call stack
   │
 RconConnection.execute
-  │  response.raise_for_status()   # 非 200 抛 HLLCommandError
-  │  return response.content_body   # JSON 字符串
+  │  response.raise_for_status()   # Non-200 throws HLLCommandError
+  │  return response.content_body   # JSON string
   ▼
 @cast_response_to_model(GetPlayersResponse)
   │  model_validate_json(result)
   ▼
-调用方得到 GetPlayersResponse 对象
+Caller receives GetPlayersResponse object
 ```
 
-### 5.2 自动重连时序
+### 5.2 Auto-reconnect Sequence
 
 ```
-[调用方 A]          [调用方 B]           [Rcon._lock]           [后台]
+[Caller A]          [Caller B]           [Rcon._lock]           [Background]
     │                  │                     │
     │ await get_players()                   │
-    │──────────────────────────────────────►│ 无连接，开始建连
-    │                  │                    │ 创建 _connecting Future
+    │──────────────────────────────────────►│ No connection, start establishing
+    │                  │                    │ Create _connecting Future
     │                  │                    │
     │                  await get_map_rotation()
-    │                  │───────────────────►│ 发现 _connecting 已存在
-    │                  │                    │ await 同一 Future
+    │                  │───────────────────►│ _connecting already exists
+    │                  │                    │ await the same Future
     │                  │◄───────────────────│
     │                  │                    │
-    │◄─────────────────────────────────────│ Future 完成，共享连接
+    │◄─────────────────────────────────────│ Future completes, shared connection
     │                  │                    │
 ```
 
-### 5.3 同步层桥接流程
+### 5.3 Sync Layer Bridge Flow
 
 ```
-主线程：SyncRcon.get_players()
+Main thread: SyncRcon.get_players()
   │
-  ├─► 若后台线程未启动，创建 Thread + asyncio.new_event_loop()
+  ├─► If background thread not started, create Thread + asyncio.new_event_loop()
   ├─► asyncio.run_coroutine_threadsafe(rcon.get_players(), loop)
   │
   ▼
-后台线程事件循环执行异步 Rcon.get_players()
+Background thread event loop executes async Rcon.get_players()
   │
   ▼
-结果通过 concurrent.futures.Future 返回到主线程
+Result returned to main thread via concurrent.futures.Future
   │
   ▼
-主线程 .result() 阻塞等待并返回
+Main thread .result() blocks and returns
 ```
 
 ---
 
-## 6. 环境搭建与开发工作流
+## 6. Environment Setup and Development Workflow
 
-### 6.1 环境要求
+### 6.1 Requirements
 
 - Python `>= 3.11`
-- 推荐工具：`uv`（`pip install uv`）
+- Recommended tool: `uv` (`pip install uv`)
 
-### 6.2 安装依赖
+### 6.2 Install Dependencies
 
 ```bash
-# 同步项目依赖与开发依赖
+# Sync project and dev dependencies
 uv sync
 
-# 或传统方式
+# Or traditional way
 pip install -e ".[dev]"
 ```
 
-### 6.3 代码检查
+### 6.3 Code Checks
 
 ```bash
 # Lint + Format
 ruff check --fix .
 ruff format .
 
-# 类型检查
+# Type check
 mypy hllrcon
 ```
 
-### 6.4 测试
+### 6.4 Testing
 
 ```bash
-# 单元测试（覆盖率）
+# Unit tests (with coverage)
 pytest --cov=hllrcon --cov-report=term-missing
 
-# 集成测试（需真实 HLL 服务器）
+# Integration tests (requires real HLL server)
 export HLL_HOST=127.0.0.1
 export HLL_PORT=12345
 export HLL_PASSWORD=your_password
 pytest tests/integration_tests/
 ```
 
-### 6.5 生成同步命令层
+### 6.5 Generate Synchronous Command Layer
 
-若修改了 `hllrcon/commands.py`，必须同步生成同步层：
+If you modify `hllrcon/commands.py`, you must regenerate the sync layer:
 
 ```bash
 python scripts/generate_sync_commands.py
 ```
 
-此脚本会覆盖 `hllrcon/sync/commands.py` 与 `tests/test_sync_commands.py`。
+This script overwrites `hllrcon/sync/commands.py` and `tests/test_sync_commands.py`.
 
 ---
 
-## 7. 调试场景与故障排查
+## 7. Debugging Scenarios and Troubleshooting
 
-### 7.1 日志配置
+### 7.1 Logging Configuration
 
-`Rcon`、`RconConnection`、`RconProtocol` 均接受可选 `logger: logging.Logger`：
+`Rcon`, `RconConnection`, `RconProtocol` all accept optional `logger: logging.Logger`:
 
 ```python
 import logging
@@ -336,27 +336,27 @@ logging.basicConfig(level=logging.DEBUG)
 rcon = Rcon(..., logger=logging.getLogger("hll"))
 ```
 
-日志级别说明：
-- `INFO`：连接建立/断开、认证成功。
-- `DEBUG`：发包/收包 ID、命令名、心跳触发。
-- `WARNING`：连接丢失、magic 错位、无 waiter 的孤儿包、心跳失败。
-- `ERROR`：超大 payload、解包失败。
+Log level explanations:
+- `INFO`: Connection established/disconnected, authentication successful.
+- `DEBUG`: Packet send/receive IDs, command names, heartbeat triggers.
+- `WARNING`: Connection lost, magic misalignment, orphan packets without waiter, heartbeat failure.
+- `ERROR`: Oversized payload, unpack failure.
 
-### 7.2 常见场景排查
+### 7.2 Common Scenario Troubleshooting
 
-| 现象 | 排查步骤 | 典型根因 |
-|------|---------|---------|
-| `HLLConnectionTimeoutError` | 检查防火墙与端口可达性；确认服务器已启动 RCON | 网络不通或端口未监听。 |
-| `HLLAuthError` | 核对密码；检查服务器 `Game.ini` 中 RCON 配置 | 密码错误或服务器未启用 RCON。 |
-| `HLLCommandError (400)` | 检查参数类型与范围；查阅 `commands_schema.json` | 请求参数非法（如玩家不在线）。 |
-| `HLLCommandError (500)` | 重试一次；检查服务器是否正在换图或负载高 | 服务器内部瞬时错误。 |
-| `TimeoutError` 频发 | 增大 `timeout`；开启 `heartbeat_interval`；检查网络抖动 | 请求超时，连接可能已半死。 |
-| 同步客户端卡死 | 检查是否从多线程并发调用阻塞方法；改用 `execute_concurrently` | 后台线程被阻塞。 |
-| `Layer.by_id()` 返回未知 layer | 确认游戏版本与库版本兼容；检查 layer ID 拼写 | 游戏更新引入新 layer，库未跟进。 |
+| Symptom | Troubleshooting Steps | Typical Root Cause |
+|---------|----------------------|-------------------|
+| `HLLConnectionTimeoutError` | Check firewall and port reachability; confirm server RCON is enabled | Network unreachable or port not listening. |
+| `HLLAuthError` | Verify password; check server `Game.ini` RCON config | Wrong password or RCON not enabled on server. |
+| `HLLCommandError (400)` | Check parameter types and ranges; consult `commands_schema.json` | Invalid request parameters (e.g. player not online). |
+| `HLLCommandError (500)` | Retry once; check if server is changing map or under high load | Server internal transient error. |
+| Frequent `TimeoutError` | Increase `timeout`; enable `heartbeat_interval`; check network jitter | Request timeout, connection may be half-dead. |
+| Sync client deadlock | Check if blocking methods are called from multiple threads; use `execute_concurrently` | Background thread is blocked. |
+| `Layer.by_id()` returns unknown layer | Confirm game version compatibility with library version; check layer ID spelling | Game update introduced new layer, library not updated. |
 
-### 7.3 协议层调试技巧
+### 7.3 Protocol Layer Debugging Tips
 
-在测试或本地环境中，可直接构造 `RconProtocol` 并抓包：
+In test or local environments, you can directly construct `RconProtocol` and capture packets:
 
 ```python
 proto = await RconProtocol.connect(host, port, password)
@@ -367,48 +367,48 @@ proto.disconnect()
 
 ---
 
-## 8. 代码修改、重构与功能扩展最佳实践
+## 8. Best Practices for Code Changes, Refactoring and Feature Extensions
 
-### 8.1 添加新的 RCON 命令
+### 8.1 Adding New RCON Commands
 
-1. 在 `hllrcon/commands.py` 的 `RconCommands` 类中添加 `async def xxx(self, ...)`。
-2. 使用 `@cast_response_to_model(Model)` 或 `@cast_response_to_bool({400})` 包装返回值。
-3. 若命令有返回体，在 `hllrcon/responses.py` 中定义对应的 Pydantic 模型。
-4. 运行 `python scripts/generate_sync_commands.py` 生成同步层代码。
-5. 在 `tests/test_commands.py` 与 `tests/test_sync_commands.py` 中补充单元测试。
-6. 确保 `mypy` 无类型错误，`pytest --cov` 覆盖新代码 100%。
+1. Add `async def xxx(self, ...)` in `RconCommands` class in `hllrcon/commands.py`.
+2. Wrap return value with `@cast_response_to_model(Model)` or `@cast_response_to_bool({400})`.
+3. If command has response body, define corresponding Pydantic model in `hllrcon/responses.py`.
+4. Run `python scripts/generate_sync_commands.py` to generate sync layer code.
+5. Add unit tests in `tests/test_commands.py` and `tests/test_sync_commands.py`.
+6. Ensure `mypy` has no type errors, `pytest --cov` covers new code 100%.
 
-### 8.2 修改数据模型
+### 8.2 Modifying Data Models
 
-- `data/` 下模型继承自 `IndexedBaseModel` 或 `CaseInsensitiveIndexedBaseModel`；注册逻辑在 `model_post_init` 中自动完成，**不要手动维护列表**。
-- 若新增 `Layer`，按现有命名规范（`MAPNAME_GAMEMODE_ENVIRONMENT`）添加 `@class_cached_property`，并确保 `sectors` 与 `grid` 参数正确。
-- `Layer` 构造函数中通过 `model_validator` 完成反向引用（`sector._layer = self`）与坐标偏移，修改时注意不要破坏 frozen 模型约束。
+- Models under `data/` inherit from `IndexedBaseModel` or `CaseInsensitiveIndexedBaseModel`; registration logic in `model_post_init` is automatic, **do not manually maintain lists**.
+- When adding `Layer`, follow existing naming convention (`MAPNAME_GAMEMODE_ENVIRONMENT`) and add `@class_cached_property`, ensuring `sectors` and `grid` parameters are correct.
+- `Layer` constructor uses `model_validator` for back-references (`sector._layer = self`) and coordinate offset; be careful not to break frozen model constraints when modifying.
 
-### 8.3 协议层变更
+### 8.3 Protocol Layer Changes
 
-- `protocol/constants.py` 中的魔数与格式字段必须与服务器实现严格一致；非兼容升级需同步更新 `__min_server_version__`。
-- `RconRequest._next_id` 为进程级计数器，多线程/多协程共享；改动时需保证线程安全。
+- Magic numbers and format fields in `protocol/constants.py` must strictly match server implementation; non-compatible upgrades need to update `__min_server_version__`.
+- `RconRequest._next_id` is a process-level counter shared across threads/coroutines; changes must ensure thread safety.
 
-### 8.4 保持 API 兼容性
+### 8.4 Maintaining API Compatibility
 
-- `hllrcon/__init__.py` 中的 `__all__` 显式控制公共 API；新增导出需同步加入。
-- 同步层 `hllrcon/sync/commands.py` 为**生成文件**，禁止手动编辑。
-- 异常层次位于 `hllrcon/exceptions.py`，新增异常应继承 `HLLError` 或其子类。
+- `__all__` in `hllrcon/__init__.py` explicitly controls public API; new exports must be added.
+- Sync layer `hllrcon/sync/commands.py` is a **generated file**, manual editing is prohibited.
+- Exception hierarchy is in `hllrcon/exceptions.py`; new exceptions should inherit from `HLLError` or its subclasses.
 
-### 8.5 版本号管理
+### 8.5 Version Management
 
-- `pyproject.toml` 的 `version` 与 `hllrcon/__init__.py` 的 `__version__` 必须**同步修改**。
-- 采用 `GRADE.MAJOR.MINOR.PATCH` 四级版本：
-  - `GRADE`：结构级变动（如 Vietnam 扩展）。
-  - `MAJOR`：不兼容 API 变更。
-  - `MINOR`：放弃对旧游戏版本的支持。
-  - `PATCH`：向后兼容的修复/小功能。
+- `version` in `pyproject.toml` and `__version__` in `hllrcon/__init__.py` must be **modified together**.
+- Uses `GRADE.MAJOR.MINOR.PATCH` four-level versioning:
+  - `GRADE`: Structural changes (e.g. Vietnam expansion).
+  - `MAJOR`: Incompatible API changes.
+  - `MINOR`: Drops support for old game versions.
+  - `PATCH`: Backwards-compatible fixes/small features.
 
 ---
 
-## 9. 附录：极简交互伪代码
+## 9. Appendix: Minimal Interaction Pseudocode
 
-### 9.1 自动重连客户端使用
+### 9.1 Auto-reconnect Client Usage
 
 ```python
 from hllrcon import Rcon, Layer
@@ -423,14 +423,14 @@ async with rcon.connect():
         print(p.name, p.faction, p.world_position)
 ```
 
-### 9.2 自定义命令执行
+### 9.2 Custom Command Execution
 
 ```python
-# 直接调用底层 execute，绕过高层封装
+# Directly call low-level execute, bypassing high-level wrappers
 raw = await rcon.execute("CustomCommand", 2, {"Key": "Value"})
 ```
 
-### 9.3 同步客户端使用
+### 9.3 Synchronous Client Usage
 
 ```python
 from hllrcon.sync import SyncRcon
@@ -440,7 +440,7 @@ with rcon.connect():
     rcon.broadcast("Hello sync world")
 ```
 
-### 9.4 响应模型扩展示例
+### 9.4 Response Model Extension Example
 
 ```python
 from pydantic import BaseModel
@@ -449,7 +449,7 @@ from hllrcon.responses import Response
 class GetCustomResponse(Response):
     value: int
 
-# 装饰器自动完成 JSON -> Model 转换
+# Decorator automatically handles JSON -> Model conversion
 @cast_response_to_model(GetCustomResponse)
 async def get_custom(self) -> str:
     return await self.execute("GetCustom", 2)
@@ -457,9 +457,9 @@ async def get_custom(self) -> str:
 
 ---
 
-## 10. 维护与演进
+## 10. Maintenance and Evolution
 
-- **同步层**：修改 `commands.py` 后务必运行 `generate_sync_commands.py`，否则 sync API 与 async API 将不一致。
-- **测试**：任何行为变更必须伴随单元测试；集成测试仅在具备真实 HLL 服务器时运行。
-- **Lint/Type**：提交前执行 `ruff check --fix .` 与 `mypy hllrcon`，确保零报错。
-- **数据更新**：游戏版本迭代时，检查 `commands_schema.json`、layer 列表与武器/载具数据，按需增补。
+- **Sync layer**: After modifying `commands.py`, always run `generate_sync_commands.py`, otherwise sync API will be inconsistent with async API.
+- **Testing**: Any behavioral change must be accompanied by unit tests; integration tests only run when a real HLL server is available.
+- **Lint/Type**: Before committing, run `ruff check --fix .` and `mypy hllrcon`, ensuring zero errors.
+- **Data updates**: When game versions iterate, check `commands_schema.json`, layer lists and weapon/vehicle data, adding as needed.
