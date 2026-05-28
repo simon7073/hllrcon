@@ -8,7 +8,6 @@ import threading
 from typing import Any, ClassVar
 
 from hllrcon.protocol.constants import (
-    HEADER_SIZE,
     MAGIC_HEADER_VALUE,
     MAX_PAYLOAD_SIZE,
     REQUEST_HEADER_FORMAT,

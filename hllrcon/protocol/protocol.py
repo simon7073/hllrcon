@@ -19,9 +19,10 @@ import logging
 import socket
 import struct
 import time
-import weakref
-from collections.abc import Callable
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from typing_extensions import override
 
@@ -38,7 +39,6 @@ from hllrcon.exceptions import (
 )
 from hllrcon.protocol.constants import (
     DEFAULT_CONNECT_TIMEOUT,
-    DEFAULT_HEARTBEAT_INTERVAL,
     DEFAULT_HEARTBEAT_TIMEOUT,
     DEFAULT_REQUEST_TIMEOUT,
     HEADER_SIZE,
@@ -310,7 +310,6 @@ class RconProtocol(asyncio.Protocol):
 
     @override
     def connection_lost(self, exc: Exception | None) -> None:
-        was_connected = self._transport is not None
         self._transport = None
         self._state = ProtocolState.CLOSED
 
@@ -405,7 +404,7 @@ class RconProtocol(asyncio.Protocol):
             try:
                 pkt = RconResponse.unpack(pkt_id, decoded_body)
             except HLLProtocolError as exc:
-                self.logger.error("Failed to unpack response id=%s: %s", pkt_id, exc)
+                self.logger.exception("Failed to unpack response id=%s", pkt_id)
                 waiter = self._waiters.pop(pkt_id, None)
                 if waiter is not None and not waiter.done():
                     waiter.set_exception(exc)
@@ -485,7 +484,8 @@ class RconProtocol(asyncio.Protocol):
 
         """
         if not self._transport:
-            raise HLLConnectionClosedError("Connection is closed")
+            msg = "Connection is closed"
+            raise HLLConnectionClosedError(msg)
 
         request = RconRequest(
             command=command,
@@ -552,17 +552,20 @@ class RconProtocol(asyncio.Protocol):
             xorkey_resp.raise_for_status()
         except Exception as exc:
             self._state = ProtocolState.CONNECTED
-            raise HLLAuthError(f"ServerConnect handshake failed: {exc}") from exc
+            msg = f"ServerConnect handshake failed: {exc}"
+            raise HLLAuthError(msg) from exc
 
         if not isinstance(xorkey_resp.content_body, str):
             self._state = ProtocolState.CONNECTED
-            raise HLLMessageError("ServerConnect response content_body is not a string")
+            msg = "ServerConnect response content_body is not a string"
+            raise HLLMessageError(msg)
 
         try:
             self.xorkey = base64.b64decode(xorkey_resp.content_body)
         except Exception as exc:
             self._state = ProtocolState.CONNECTED
-            raise HLLMessageError(f"Invalid xorkey base64: {exc}") from exc
+            msg = f"Invalid xorkey base64: {exc}"
+            raise HLLMessageError(msg) from exc
 
         try:
             auth_resp = await self.execute("Login", 2, password)
@@ -570,11 +573,13 @@ class RconProtocol(asyncio.Protocol):
         except HLLCommandError as exc:
             self._state = ProtocolState.CONNECTED
             self.xorkey = None
-            raise HLLAuthError("Authentication failed: incorrect password") from exc
+            msg = "Authentication failed: incorrect password"
+            raise HLLAuthError(msg) from exc
         except Exception as exc:
             self._state = ProtocolState.CONNECTED
             self.xorkey = None
-            raise HLLAuthError(f"Login handshake failed: {exc}") from exc
+            msg = f"Login handshake failed: {exc}"
+            raise HLLAuthError(msg) from exc
 
         self.auth_token = auth_resp.content_body
         self._state = ProtocolState.AUTHENTICATED
@@ -608,7 +613,11 @@ class RconProtocol(asyncio.Protocol):
             self.logger.debug("Sending application heartbeat")
             try:
                 await asyncio.wait_for(
-                    self.execute("GetServerInformation", 2, {"Name": "serverconfig", "Value": ""}),
+                    self.execute(
+                        "GetServerInformation",
+                        2,
+                        {"Name": "serverconfig", "Value": ""},
+                    ),
                     timeout=self._heartbeat_timeout,
                 )
             except Exception:

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
 
 from hllrcon.client import RconClient
 from hllrcon.connection import RconConnection
 from hllrcon.exceptions import HLLConnectionClosedError, HLLConnectionError
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
 class Rcon(RconClient):
@@ -149,7 +151,8 @@ class Rcon(RconClient):
         self._connection = None
         self._failure_count = 0
         if self._connecting is not None and not self._connecting.done():
-            self._connecting.set_exception(HLLConnectionClosedError("Client disconnected"))
+            msg = "Client disconnected"
+            self._connecting.set_exception(HLLConnectionClosedError(msg))
         self._connecting = None
 
     @override

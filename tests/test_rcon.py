@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 from hllrcon.connection import RconConnection
-from hllrcon.exceptions import HLLConnectionClosedError, HLLError
+from hllrcon.exceptions import HLLError
 from hllrcon.rcon import Rcon
 
 pytestmark = pytest.mark.asyncio

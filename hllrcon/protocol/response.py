@@ -29,12 +29,12 @@ class RconResponse:
     """Represents a single RCON response."""
 
     __slots__ = (
-        "request_id",
+        "content_body",
         "name",
-        "version",
+        "request_id",
         "status_code",
         "status_message",
-        "content_body",
+        "version",
     )
 
     def __init__(

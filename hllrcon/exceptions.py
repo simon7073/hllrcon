@@ -7,10 +7,7 @@ error handling in production code.
 
 from __future__ import annotations
 
-from typing import Any
-
 __all__ = (
-    "HLLError",
     "HLLAuthError",
     "HLLCommandError",
     "HLLConnectionClosedError",
@@ -18,6 +15,7 @@ __all__ = (
     "HLLConnectionLostError",
     "HLLConnectionRefusedError",
     "HLLConnectionTimeoutError",
+    "HLLError",
     "HLLMessageError",
     "HLLProtocolError",
     "HLLRconWarning",

@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
 
 from hllrcon.commands import RconCommands
-from hllrcon.exceptions import HLLConnectionClosedError, HLLConnectionLostError
+from hllrcon.exceptions import HLLConnectionLostError
 from hllrcon.protocol.protocol import RconProtocol
 
 if TYPE_CHECKING:
+    import logging
     from collections.abc import Callable
 
 
@@ -41,11 +42,8 @@ class RconConnection(RconCommands):
     def _on_disconnect(self, _: Exception | None) -> None:
         """Internal callback forwarded to ``protocol.on_connection_lost``."""
         self._disconnect_event.set()
-        try:
+        with contextlib.suppress(Exception):
             self.on_disconnect()
-        except Exception:
-            # Swallow user callback errors to avoid breaking protocol cleanup.
-            pass
 
     async def wait_until_disconnected(self) -> None:
         """Block until the connection closes."""
@@ -60,7 +58,7 @@ class RconConnection(RconCommands):
         logger: logging.Logger | None = None,
         timeout: float | None = 10.0,
         heartbeat_interval: float = 0.0,
-    ) -> "RconConnection":
+    ) -> RconConnection:
         """Connect to the RCON server.
 
         Parameters
@@ -110,7 +108,8 @@ class RconConnection(RconCommands):
 
         """
         if self._disconnect_event.is_set() and not self._protocol.is_connected():
-            raise HLLConnectionLostError("Connection has been lost")
+            msg = "Connection has been lost"
+            raise HLLConnectionLostError(msg)
 
         response = await self._protocol.execute(command, version, body)
         response.raise_for_status()

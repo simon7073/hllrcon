@@ -6,7 +6,6 @@ import asyncio
 import base64
 import binascii
 import json
-from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -18,7 +17,6 @@ from hllrcon.exceptions import (
     HLLConnectionRefusedError,
     HLLConnectionTimeoutError,
     HLLMessageError,
-    HLLProtocolError,
 )
 from hllrcon.protocol.constants import MAGIC_HEADER_BYTES
 from hllrcon.protocol.protocol import ProtocolState, RconProtocol

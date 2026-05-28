@@ -8,19 +8,20 @@ All operations are marshalled to that thread via
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
-import time
-import weakref
-from collections.abc import Generator
-from concurrent.futures import Future
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
 
 from hllrcon.rcon import Rcon
 from hllrcon.sync.commands import SyncRconCommands
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from concurrent.futures import Future
 
 
 class SyncRcon(SyncRconCommands):
@@ -154,14 +155,14 @@ class SyncRcon(SyncRconCommands):
                 loop.run_forever()
             finally:
                 # Drain any remaining tasks before closing.
-                try:
+                with contextlib.suppress(Exception):
                     pending = asyncio.all_tasks(loop)
                     if pending:
                         for task in pending:
                             task.cancel()
-                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                except Exception:
-                    pass
+                        loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True),
+                        )
                 loop.close()
                 self._loop = None
 
@@ -182,10 +183,8 @@ class SyncRcon(SyncRconCommands):
     def disconnect(self) -> None:
         """Disconnect and stop the background thread."""
         if self._loop is not None and self._loop.is_running():
-            try:
+            with contextlib.suppress(Exception):
                 self._run_coroutine(self._rcon.disconnect())
-            except Exception:
-                pass
             # Schedule loop.stop from inside the loop so it exits run_forever().
             self._loop.call_soon_threadsafe(self._loop.stop)
 
@@ -210,7 +209,10 @@ class SyncRcon(SyncRconCommands):
 
         """
         self.wait_until_connected()
-        return self._run_coroutine(self._rcon.execute(command, version, body), block=False)
+        return self._run_coroutine(
+            self._rcon.execute(command, version, body),
+            block=False,
+        )
 
     @override
     def execute(
@@ -228,7 +230,7 @@ class SyncRcon(SyncRconCommands):
 
     def _run_coroutine(
         self,
-        coro: asyncio.Future[str] | asyncio.Coroutine[Any, Any, str],
+        coro: asyncio.Future[str] | Any,
         *,
         block: bool = True,
     ) -> Future[str]:
