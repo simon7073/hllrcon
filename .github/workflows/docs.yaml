@@ -40,6 +40,9 @@ jobs:
         with:
           python-version-file: "pyproject.toml"
 
+      - name: Install dependencies
+        run: uv sync --group docs
+
       - name: Sync docs
         run: |
           cp README.md docs/index.md
