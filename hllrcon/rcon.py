@@ -155,7 +155,6 @@ class Rcon(RconClient):
             self._connecting.set_exception(HLLConnectionClosedError(msg))
         self._connecting = None
 
-    @override
     async def execute(
         self,
         command: str,

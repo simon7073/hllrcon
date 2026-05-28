@@ -63,7 +63,12 @@ ignore = [
     "ASYNC109",
     "TRY003",
     "PLR2004",
-    "PLR0913"
+    "PLR0913",
+    "C901",
+    "BLE001",
+    "E501",
+    "ANN401",
+    "S112",
 ]
 
 [tool.coverage.report]

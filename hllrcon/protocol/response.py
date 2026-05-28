@@ -142,14 +142,18 @@ class RconResponse:
             msg = f"Response body must be a JSON object, got {type(body).__name__}"
             raise HLLMessageError(msg)
 
-        def _get(key: str, expected_type: type) -> Any:
+        def _get(key: str, expected_type: type | tuple[type, ...]) -> Any:
             value = body.get(key)
             if value is None:
                 msg = f"Missing required field '{key}' in response"
                 raise HLLProtocolError(msg)
             if not isinstance(value, expected_type):
+                if isinstance(expected_type, tuple):
+                    type_name = " | ".join(t.__name__ for t in expected_type)
+                else:
+                    type_name = expected_type.__name__
                 msg = (
-                    f"Field '{key}' expected {expected_type.__name__}, "
+                    f"Field '{key}' expected {type_name}, "
                     f"got {type(value).__name__}"
                 )
                 raise HLLMessageError(msg)

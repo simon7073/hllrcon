@@ -41,7 +41,7 @@ class IndexedBaseModel(BaseModel, Generic[H, R]):
         id: H = PrivateAttr()
 
     @classmethod
-    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:  # noqa: ANN401
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         if (
             cls.model_fields
             and "id" not in cls.model_fields
@@ -70,7 +70,7 @@ class IndexedBaseModel(BaseModel, Generic[H, R]):
         msg = f"{cls.__name__} with ID {id_} not found."
         raise ValueError(msg)
 
-    def model_post_init(self, context: Any) -> None:  # noqa: ANN401, ARG002
+    def model_post_init(self, context: Any) -> None:  # noqa: ARG002
         self._lookup_register(self.id, self)
 
     def __eq__(self, other: object) -> bool:

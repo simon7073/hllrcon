@@ -141,7 +141,7 @@ class SyncRcon(SyncRconCommands):
     def wait_until_connected(self) -> None:
         """Ensure the background event loop and connection are ready."""
         if self._loop is not None and self._loop.is_running():
-            self._run_coroutine(self._rcon.wait_until_connected())
+            self._run_coroutine(self._rcon.wait_until_connected()).result()
             return
 
         self._shutdown_event.clear()
@@ -178,7 +178,7 @@ class SyncRcon(SyncRconCommands):
             msg = "Background event loop failed to start within 5 seconds"
             raise RuntimeError(msg)
 
-        self._run_coroutine(self._rcon.wait_until_connected())
+        self._run_coroutine(self._rcon.wait_until_connected()).result()
 
     def disconnect(self) -> None:
         """Disconnect and stop the background thread."""
@@ -230,7 +230,7 @@ class SyncRcon(SyncRconCommands):
 
     def _run_coroutine(
         self,
-        coro: asyncio.Future[str] | Any,
+        coro: Any,
         *,
         block: bool = True,
     ) -> Future[str]:
@@ -252,5 +252,5 @@ class SyncRcon(SyncRconCommands):
 
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         if block:
-            return future  # type: ignore[return-value]
+            return future
         return future

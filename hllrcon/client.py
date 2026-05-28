@@ -29,7 +29,7 @@ class RconClient(ABC):
 
         The connection is torn down when the context manager exits.
         """
-        yield  # type: ignore[misc]
+        yield
 
     @abstractmethod
     async def wait_until_connected(self) -> None:
