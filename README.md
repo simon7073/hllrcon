@@ -10,6 +10,9 @@
 <a href="https://github.com/simon7073/hllrcon/blob/master/LICENSE" target="_blank">
     <img src="https://img.shields.io/github/license/simon7073/hllrcon.svg" alt="License">
 </a>
+<a href="https://codecov.io/gh/simon7073/hllrcon" target="_blank">
+    <img src="https://img.shields.io/codecov/c/github/simon7073/hllrcon" alt="Codecov">
+</a>
 <a href="https://github.com/simon7073/hllrcon/graphs/contributors" target="_blank">
     <img src="https://img.shields.io/github/contributors/simon7073/hllrcon.svg" alt="GitHub contributors">
 </a>
