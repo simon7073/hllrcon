@@ -43,13 +43,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --group docs
 
-      - name: Sync docs
-        run: |
-          cp README.md docs/en/index.md
-          cp README.md docs/zh/index.md
-          cp plans/architecture.md docs/en/architecture.md
-          cp plans/architecture.md docs/zh/architecture.md
-
       - name: Build site
         run: uv run mkdocs build --strict
 
