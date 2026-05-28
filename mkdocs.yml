@@ -25,7 +25,6 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.instant
     - navigation.tracking
     - navigation.sections
     - navigation.expand
@@ -41,6 +40,21 @@ plugins:
   - search
   - minify:
       minify_html: true
+  - i18n:
+      docs_structure: folder
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+          site_name: hllrcon
+          site_description: Asynchronous Python implementation of the Hell Let Loose RCON protocol
+        - locale: zh
+          name: 中文
+          build: true
+          site_name: hllrcon
+          site_description: Hell Let Loose RCON 协议的异步 Python 实现
+      fallback_to_default: true
 
 markdown_extensions:
   - admonition
@@ -60,6 +74,9 @@ markdown_extensions:
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/lang-redirect.js
 
 nav:
   - Home: index.md
