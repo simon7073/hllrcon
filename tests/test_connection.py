@@ -1,4 +1,9 @@
+"""Tests for `hllrcon.connection`."""
+
+from __future__ import annotations
+
 import asyncio
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -10,14 +15,14 @@ from hllrcon.protocol.response import RconResponse, RconResponseStatus
 
 
 @pytest.fixture
-def protocol() -> RconProtocol:
-    """Fixture to create a mock RconProtocol."""
+def protocol() -> mock.Mock:
+    """Mock RconProtocol with connection loss simulation."""
     mock_protocol = mock.Mock(spec=RconProtocol)
 
     def connection_lost(exc: Exception | None) -> None:
-        """Mock connection lost method."""
         mock_protocol.is_connected.return_value = False
-        mock_protocol.on_connection_lost(exc)
+        if mock_protocol.on_connection_lost:
+            mock_protocol.on_connection_lost(exc)
 
     mock_protocol.is_connected.return_value = True
     mock_protocol.connection_lost = connection_lost
@@ -27,17 +32,19 @@ def protocol() -> RconProtocol:
 @pytest_asyncio.fixture
 async def connection(
     monkeypatch: pytest.MonkeyPatch,
-    protocol: RconProtocol,
+    protocol: mock.Mock,
 ) -> RconConnection:
-    """Fixture to create a mock RconProtocol."""
-    monkeypatch.setattr(RconProtocol, "connect", mock.AsyncMock(return_value=protocol))
+    monkeypatch.setattr(
+        RconProtocol,
+        "connect",
+        mock.AsyncMock(return_value=protocol),
+    )
     return await RconConnection.connect("localhost", 1234, "password")
 
 
 @pytest.mark.asyncio
-async def test_is_connected(connection: RconConnection, protocol: RconProtocol) -> None:
+async def test_is_connected(connection: RconConnection, protocol: mock.Mock) -> None:
     assert connection.is_connected() is True
-
     protocol.connection_lost(None)
     assert connection.is_connected() is False
 
@@ -49,7 +56,6 @@ async def test_disconnect(connection: RconConnection, protocol: mock.Mock) -> No
             await connection.wait_until_disconnected()
 
     connection.disconnect()
-
     protocol.disconnect.assert_called_once()
     protocol.connection_lost(None)
 
@@ -58,27 +64,18 @@ async def test_disconnect(connection: RconConnection, protocol: mock.Mock) -> No
 
 
 @pytest.mark.asyncio
-async def test_execute(
-    connection: RconConnection,
-    protocol: mock.Mock,
-) -> None:
-    command = "test_command"
-    version = 1
-    body = "test_body"
-    response = "response"
-
+async def test_execute(connection: RconConnection, protocol: mock.Mock) -> None:
     protocol.execute.return_value = RconResponse(
         request_id=1,
-        command=command,
-        version=version,
+        command="test_command",
+        version=1,
         status_code=RconResponseStatus.OK,
         status_message="OK",
         content_body="response",
     )
-
-    result = await connection.execute(command, version, body)
-    assert result == response
+    result = await connection.execute("test_command", 1, "test_body")
+    assert result == "response"
 
     protocol.connection_lost(None)
     with pytest.raises(HLLConnectionLostError):
-        await connection.execute(command, version, body)
+        await connection.execute("test_command", 1, "test_body")

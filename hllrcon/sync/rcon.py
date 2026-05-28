@@ -1,6 +1,17 @@
+"""Synchronous wrapper around the asynchronous :class:`hllrcon.rcon.Rcon`.
+
+The synchronous client runs an asyncio event loop in a dedicated daemon thread.
+All operations are marshalled to that thread via
+:func:`asyncio.run_coroutine_threadsafe`.
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import threading
+import time
+import weakref
 from collections.abc import Generator
 from concurrent.futures import Future
 from contextlib import contextmanager
@@ -15,11 +26,9 @@ from hllrcon.sync.commands import SyncRconCommands
 class SyncRcon(SyncRconCommands):
     """A synchronous interface for connecting to an RCON server.
 
-    This is a wrapper for the asynchronous `Rcon` class, which is being run in a
-    separate thread with its own event loop.
-
-    To execute commands concurrently, a new `execute_concurrently` method is provided,
-    which returns a `concurrent.futures.Future` object.
+    Internally this wraps :class:`Rcon` running in a background thread with its
+    own event loop. All methods block the calling thread until the result is
+    available.
     """
 
     def __init__(
@@ -29,25 +38,24 @@ class SyncRcon(SyncRconCommands):
         password: str,
         logger: logging.Logger | None = None,
         reconnect_after_failures: int = 3,
+        heartbeat_interval: float = 0.0,
     ) -> None:
-        """Initialize a new `Rcon` instance.
+        """Initialize a new `SyncRcon` instance.
 
         Parameters
         ----------
-        host : str
-            The hostname or IP address of the RCON server.
-        port : int
-            The port of the RCON server.
-        password : str
-            The password for the RCON server.
-        logger : logging.Logger | None, optional
-            A logger instance for logging messages, by default None. If None,
-            `logging.getLogger(__name__)` is used.
-        reconnect_after_failures : int, optional
-            After how many failed attempts to execute a command the active connection is
-            disposed and a new connection is established on the next command execution.
-            If the server responds to a request, the failure count is reset, even if the
-            server returned an error. Set to 0 to disable, by default 3.
+        host :
+            Hostname or IP address.
+        port :
+            RCON port.
+        password :
+            Server password.
+        logger :
+            Optional logger.
+        reconnect_after_failures :
+            Passed through to the underlying :class:`Rcon`.
+        heartbeat_interval :
+            Passed through to the underlying :class:`Rcon`.
 
         """
         self._logger = logger
@@ -57,8 +65,15 @@ class SyncRcon(SyncRconCommands):
             password,
             logger=logger,
             reconnect_after_failures=reconnect_after_failures,
+            heartbeat_interval=heartbeat_interval,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._shutdown_event = threading.Event()
+
+    # --------------------------------------------------------------------- #
+    # Properties
+    # --------------------------------------------------------------------- #
 
     @property
     def host(self) -> str:
@@ -101,15 +116,12 @@ class SyncRcon(SyncRconCommands):
     def reconnect_after_failures(self, value: int) -> None:
         self._rcon.reconnect_after_failures = value
 
+    # --------------------------------------------------------------------- #
+    # Connection management
+    # --------------------------------------------------------------------- #
+
     def is_connected(self) -> bool:
-        """Check if the client is connected to the RCON server.
-
-        Returns
-        -------
-        bool
-            True if connected, False otherwise.
-
-        """
+        """Return ``True`` if the loop is running and the client is connected."""
         return (
             self._loop is not None
             and self._loop.is_running()
@@ -118,7 +130,7 @@ class SyncRcon(SyncRconCommands):
 
     @contextmanager
     def connect(self) -> Generator[None]:
-        """Establish a connection to the RCON server."""
+        """Establish a connection and yield, tearing it down on exit."""
         self.wait_until_connected()
         try:
             yield
@@ -126,48 +138,63 @@ class SyncRcon(SyncRconCommands):
             self.disconnect()
 
     def wait_until_connected(self) -> None:
-        """Wait until the client is connected to the RCON server.
+        """Ensure the background event loop and connection are ready."""
+        if self._loop is not None and self._loop.is_running():
+            self._run_coroutine(self._rcon.wait_until_connected())
+            return
 
-        This might be useful to verify that a connection can be established before
-        continuing with other operations.
-        """
-        if self._loop is None or not self._loop.is_running():
-            event = threading.Event()
+        self._shutdown_event.clear()
+        ready_event = threading.Event()
 
-            def target() -> None:
-                self._loop = asyncio.new_event_loop()
-                self._loop.call_soon(event.set)
-                self._loop.run_forever()
+        def target() -> None:
+            loop = asyncio.new_event_loop()
+            self._loop = loop
+            loop.call_soon(ready_event.set)
+            try:
+                loop.run_forever()
+            finally:
+                # Drain any remaining tasks before closing.
+                try:
+                    pending = asyncio.all_tasks(loop)
+                    if pending:
+                        for task in pending:
+                            task.cancel()
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                except Exception:
+                    pass
+                loop.close()
+                self._loop = None
 
-            threading.Thread(
-                target=target,
-                name=f"SyncRconThread{id(self)}",
-                daemon=True,
-            ).start()
+        self._thread = threading.Thread(
+            target=target,
+            name=f"SyncRconThread-{id(self)}",
+            daemon=True,
+        )
+        self._thread.start()
 
-            # Wait for the loop to have started
-            if not event.wait(timeout=1):
-                if self._loop is not None:
-                    self._loop.stop()
-                    self._loop = None
-                msg = "Thread never signalled back"
-                raise RuntimeError(msg) from None
-
-        if self._loop is None:  # pragma: no cover
-            msg = "Could not run event loop"
+        if not ready_event.wait(timeout=5.0):
+            self.disconnect()
+            msg = "Background event loop failed to start within 5 seconds"
             raise RuntimeError(msg)
 
-        asyncio.run_coroutine_threadsafe(
-            self._rcon.wait_until_connected(),
-            loop=self._loop,
-        ).result()
+        self._run_coroutine(self._rcon.wait_until_connected())
 
     def disconnect(self) -> None:
-        """Disconnect from the RCON server."""
-        self._rcon.disconnect()
-        if self._loop is not None:
-            self._loop.stop()
+        """Disconnect and stop the background thread."""
+        if self._loop is not None and self._loop.is_running():
+            try:
+                self._run_coroutine(self._rcon.disconnect())
+            except Exception:
+                pass
+            # Schedule loop.stop from inside the loop so it exits run_forever().
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+
         self._loop = None
+        self._thread = None
+        self._shutdown_event.set()
 
     def execute_concurrently(
         self,
@@ -175,35 +202,15 @@ class SyncRcon(SyncRconCommands):
         version: int,
         body: str | dict[str, Any] = "",
     ) -> Future[str]:
-        """Schedule the execution of a command on the RCON server.
+        """Schedule a command for execution and return a :class:`Future`.
 
-        This method allows for concurrent execution of commands.
-
-        Parameters
-        ----------
-        command : str
-            The command to execute.
-        version : int
-            The version of the command to execute.
-        body : str | dict[str, Any], optional
-            The body of the command, by default an empty string.
-
-        Returns
-        -------
-        concurrent.futures.Future[str]
-            A Future representing the response from the server.
+        This is the only way to execute commands concurrently from multiple
+        threads — each call returns immediately with a future that completes
+        when the response arrives.
 
         """
         self.wait_until_connected()
-
-        if self._loop is None:  # pragma: no cover
-            msg = "Could not run event loop"
-            raise RuntimeError(msg)
-
-        return asyncio.run_coroutine_threadsafe(
-            self._rcon.execute(command, version, body),
-            loop=self._loop,
-        )
+        return self._run_coroutine(self._rcon.execute(command, version, body), block=False)
 
     @override
     def execute(
@@ -212,8 +219,36 @@ class SyncRcon(SyncRconCommands):
         version: int,
         body: str | dict[str, Any] = "",
     ) -> str:
-        return self.execute_concurrently(
-            command=command,
-            version=version,
-            body=body,
-        ).result()
+        """Execute a command and block until the response arrives."""
+        return self.execute_concurrently(command, version, body).result()
+
+    # --------------------------------------------------------------------- #
+    # Internal helpers
+    # --------------------------------------------------------------------- #
+
+    def _run_coroutine(
+        self,
+        coro: asyncio.Future[str] | asyncio.Coroutine[Any, Any, str],
+        *,
+        block: bool = True,
+    ) -> Future[str]:
+        """Marshal *coro* to the background loop.
+
+        Parameters
+        ----------
+        coro :
+            The awaitable to run.
+        block :
+            If ``True`` this method returns the raw
+            :class:`concurrent.futures.Future` and the caller must call
+            ``.result()``.
+
+        """
+        if self._loop is None or not self._loop.is_running():
+            msg = "Background event loop is not running"
+            raise RuntimeError(msg)
+
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        if block:
+            return future  # type: ignore[return-value]
+        return future

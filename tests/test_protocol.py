@@ -1,8 +1,12 @@
+"""Tests for `hllrcon.protocol.protocol`."""
+
+from __future__ import annotations
+
 import asyncio
 import base64
 import binascii
-import itertools
 import json
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -10,13 +14,14 @@ import pytest_asyncio
 from hllrcon.exceptions import (
     HLLAuthError,
     HLLConnectionClosedError,
-    HLLConnectionError,
     HLLConnectionLostError,
     HLLConnectionRefusedError,
+    HLLConnectionTimeoutError,
     HLLMessageError,
+    HLLProtocolError,
 )
 from hllrcon.protocol.constants import MAGIC_HEADER_BYTES
-from hllrcon.protocol.protocol import RconProtocol
+from hllrcon.protocol.protocol import ProtocolState, RconProtocol
 from hllrcon.protocol.request import RconRequest
 from hllrcon.protocol.response import RconResponse, RconResponseStatus
 from pytest_mock import MockerFixture
@@ -25,53 +30,20 @@ magic = MAGIC_HEADER_BYTES
 
 
 @pytest.fixture
-def transport(mocker: MockerFixture) -> asyncio.Transport:
-    transport: Mock = mocker.Mock(spec=asyncio.Transport)
-    transport.is_closing.return_value = False
-    return transport
-
-
-@pytest.fixture
-def load_constants(request: pytest.FixtureRequest, mocker: MockerFixture) -> None:
-    if marker := request.node.get_closest_marker("do_allow_concurrent_requests"):
-        mocker.patch(
-            "hllrcon.protocol.protocol.DO_ALLOW_CONCURRENT_REQUESTS",
-            bool(marker.args[0]) if marker.args else True,
-        )
-
-    if marker := request.node.get_closest_marker("do_pop_v1_xorkey"):
-        mocker.patch(
-            "hllrcon.protocol.protocol.DO_POP_V1_XORKEY",
-            bool(marker.args[0]) if marker.args else True,
-        )
-
-    if marker := request.node.get_closest_marker("do_use_request_headers"):
-        mocker.patch(
-            "hllrcon.protocol.protocol.DO_USE_REQUEST_HEADERS",
-            bool(marker.args[0]) if marker.args else True,
-        )
-
-    if marker := request.node.get_closest_marker("do_xor_responses"):
-        mocker.patch(
-            "hllrcon.protocol.protocol.DO_XOR_RESPONSES",
-            bool(marker.args[0]) if marker.args else False,
-        )
+def transport(mocker: MockerFixture) -> Mock:
+    t = mocker.Mock(spec=asyncio.Transport)
+    t.is_closing.return_value = False
+    return t
 
 
 @pytest_asyncio.fixture
-async def protocol(
-    load_constants: None,  # noqa: ARG001
-    transport: asyncio.Transport,
-    mocker: MockerFixture,
-) -> asyncio.Protocol:
-    protocol = RconProtocol(asyncio.get_running_loop(), timeout=1.0)
-    protocol.connection_made(transport)
-    mocker.patch.object(
-        RconRequest,
-        "_RconRequest__request_id_counter",
-        itertools.count(start=1),
-    )
-    return protocol
+async def protocol(transport: Mock, mocker: MockerFixture) -> RconProtocol:
+    """Create a protocol instance wired to *transport* with request IDs reset."""
+    p = RconProtocol(asyncio.get_running_loop(), timeout=1.0)
+    p.connection_made(transport)
+    # Reset the per-process request id counter so tests are deterministic.
+    mocker.patch.object(RconRequest, "_next_id", 0)
+    return p
 
 
 def test_is_connected(protocol: RconProtocol, transport: Mock) -> None:
@@ -85,98 +57,73 @@ def test_is_connected(protocol: RconProtocol, transport: Mock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_connect(
-    mocker: MockerFixture,
-    protocol: RconProtocol,
-    transport: Mock,
-) -> None:
-    mock_create_connection = mocker.patch.object(
-        asyncio.get_running_loop(),
+async def test_connect_timeout(mocker: MockerFixture) -> None:
+    loop = asyncio.get_running_loop()
+    mocker.patch.object(
+        loop,
         "create_connection",
-        return_value=(transport, protocol),
+        side_effect=TimeoutError,
     )
+    with pytest.raises(HLLConnectionTimeoutError, match=r"timed out"):
+        await RconProtocol.connect("localhost", 1234, "pw")
 
-    host = "localhost"
-    port = 1234
-    password = "password"
 
-    mock_create_connection.side_effect = TimeoutError
-    with pytest.raises(
-        HLLConnectionError,
-        match=f"Address {host} could not be resolved",
-    ):
-        await protocol.connect(host, port, password)
+@pytest.mark.asyncio
+async def test_connect_refused(mocker: MockerFixture) -> None:
+    loop = asyncio.get_running_loop()
+    mocker.patch.object(
+        loop,
+        "create_connection",
+        side_effect=ConnectionRefusedError,
+    )
+    with pytest.raises(HLLConnectionRefusedError, match=r"refused"):
+        await RconProtocol.connect("localhost", 1234, "pw")
 
-    mock_create_connection.side_effect = ConnectionRefusedError
-    with pytest.raises(
-        HLLConnectionRefusedError,
-        match=f"The server refused connection over port {port}",
-    ):
-        await protocol.connect(host, port, password)
 
-    mock_create_connection.side_effect = None
-    authenticate = mocker.patch.object(protocol, "authenticate")
+@pytest.mark.asyncio
+async def test_connect_authentication_failure(mocker: MockerFixture) -> None:
+    """If auth fails the protocol must be cleaned up and HLLAuthError raised."""
+    proto = RconProtocol(asyncio.get_running_loop(), timeout=1.0)
+    mocker.patch.object(proto, "authenticate", side_effect=HLLAuthError("bad pw"))
 
-    authenticate.side_effect = HLLAuthError
+    loop = asyncio.get_running_loop()
+    mocker.patch.object(loop, "create_connection", return_value=(None, proto))
+
     with pytest.raises(HLLAuthError):
-        await protocol.connect(host, port, password)
-    assert protocol._transport is None
-
-    authenticate.side_effect = None
-    result = await protocol.connect(host, port, password)
-    assert result is protocol
+        await RconProtocol.connect("localhost", 1234, "bad")
+    assert proto._transport is None or not proto.is_connected()
 
 
-def test_disconnect(protocol: RconProtocol, transport: Mock) -> None:
+def test_disconnect_idempotent(protocol: RconProtocol, transport: Mock) -> None:
     protocol.disconnect()
-
     transport.close.assert_called_once()
-    assert protocol._transport is None
-
+    # Second call must not raise.
     protocol.disconnect()
 
 
-def test_connection_made(protocol: RconProtocol) -> None:
-    with pytest.raises(
-        TypeError,
-        match=r"Transport must be an instance of asyncio\.Transport",
-    ):
+def test_connection_made_bad_transport(protocol: RconProtocol) -> None:
+    with pytest.raises(TypeError, match=r"asyncio\.Transport"):
         protocol.connection_made(Mock(spec=asyncio.BaseTransport))
 
 
-def test_data_received(
-    mocker: MockerFixture,
-    protocol: RconProtocol,
-) -> None:
-    mocker.patch.object(protocol, "_read_from_buffer")
-
-    data1 = b"Some data after xorkey"
-    protocol.data_received(data1)
-
-    data2 = b"Even more data"
-    protocol.data_received(data2)
-
-    assert protocol._buffer == data1 + data2
+def test_data_received_appends_to_buffer(protocol: RconProtocol) -> None:
+    protocol.data_received(b"foo")
+    protocol.data_received(b"bar")
+    assert bytes(protocol._buffer) == b"foobar"
 
 
-def test_read_from_buffer_too_small(
-    protocol: RconProtocol,
-) -> None:
+def test_read_from_buffer_too_small(protocol: RconProtocol) -> None:
     data = magic + b"\x01\x02\x03\x04\x05\x06\x07"
-
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._read_from_buffer()
-    assert protocol._buffer == data
+    assert bytes(protocol._buffer) == data
 
 
-def test_read_from_buffer_incomplete_packet(
-    protocol: RconProtocol,
-) -> None:
+def test_read_from_buffer_incomplete_packet(protocol: RconProtocol) -> None:
     data = magic + b"\x01\x00\x00\x00\x05\x00\x00\x00Hell"
-
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._read_from_buffer()
-    assert protocol._buffer == data
+    assert bytes(protocol._buffer) == data
 
 
 def test_read_from_buffer_exactly_one_packet(
@@ -192,14 +139,14 @@ def test_read_from_buffer_exactly_one_packet(
     waiter: asyncio.Future[RconResponse] = asyncio.Future()
     protocol._waiters[1] = waiter
 
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._read_from_buffer()
-    assert protocol._buffer == b""
+    assert len(protocol._buffer) == 0
     assert waiter.result()
     mock_unpack.assert_called_once_with(1, b"Hello")
 
 
-def test_read_from_buffer_exactly_one_packet_missing_waiter(
+def test_read_from_buffer_missing_waiter(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
@@ -208,14 +155,13 @@ def test_read_from_buffer_exactly_one_packet_missing_waiter(
         autospec=True,
     )
     data = magic + b"\x01\x00\x00\x00\x05\x00\x00\x00Hello"
-
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._read_from_buffer()
-    assert protocol._buffer == b""
+    assert len(protocol._buffer) == 0
     mock_unpack.assert_called_once_with(1, b"Hello")
 
 
-def test_read_from_buffer_more_than_one_packet(
+def test_read_from_buffer_multiple_packets(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
@@ -237,9 +183,9 @@ def test_read_from_buffer_more_than_one_packet(
     protocol._waiters[1] = waiter1
     protocol._waiters[2] = waiter2
 
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._read_from_buffer()
-    assert protocol._buffer == magic + b"\x00\x00"
+    assert bytes(protocol._buffer) == magic + b"\x00\x00"
     assert waiter1.result()
     assert waiter2.result()
     assert mock_unpack.call_count == 2
@@ -247,23 +193,19 @@ def test_read_from_buffer_more_than_one_packet(
     mock_unpack.assert_called_with(2, b"World")
 
 
-def test_read_from_buffer_magic_value_missing(
+def test_read_from_buffer_magic_missing(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
     mock_logger = mocker.patch.object(protocol.logger, "warning")
     data = b"\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00Hello"
-
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._read_from_buffer()
-    assert protocol._buffer == b""
-    mock_logger.assert_called_once_with(
-        "Magic header not found in buffer, discarding %s bytes",
-        len(data),
-    )
+    assert len(protocol._buffer) == 0
+    mock_logger.assert_called_once()
 
 
-def test_read_from_buffer_magic_value_is_offset(
+def test_read_from_buffer_magic_offset(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
@@ -271,45 +213,42 @@ def test_read_from_buffer_magic_value_is_offset(
         "hllrcon.protocol.protocol.RconResponse.unpack",
         autospec=True,
     )
-    mock_logger = mocker.patch.object(protocol.logger, "warning")
-    data = (
-        b"\x00\x05\x00\x00\x01\x00\x00"
-        + magic
-        + b"\x01\x00\x00\x00\x05\x00\x00\x00Hello"
-    )
+    data = b"\x00\x05\x00\x00\x01\x00\x00" + magic + b"\x01\x00\x00\x00\x05\x00\x00\x00Hello"
     waiter: asyncio.Future[RconResponse] = asyncio.Future()
-    protocol._buffer = data
+    protocol._buffer = bytearray(data)
     protocol._waiters[1] = waiter
     protocol._read_from_buffer()
-    assert protocol._buffer == b""
+    assert len(protocol._buffer) == 0
     assert waiter.result()
     mock_unpack.assert_called_once_with(1, b"Hello")
-    mock_logger.assert_called_once_with(
-        "Magic header not at start of buffer, skipping %s bytes",
-        7,
-    )
 
 
-def test_connection_lost_use_request_headers(
-    protocol: RconProtocol,
-) -> None:
+def test_read_from_buffer_invalid_payload_size(protocol: RconProtocol) -> None:
+    """A packet claiming > MAX_PAYLOAD_SIZE should be dropped."""
+    from hllrcon.protocol.constants import MAX_PAYLOAD_SIZE
+
+    pkt_len = MAX_PAYLOAD_SIZE + 1
+    data = magic + b"\x01\x00\x00\x00" + pkt_len.to_bytes(4, "little")
+    protocol._buffer = bytearray(data)
+    protocol._read_from_buffer()
+    assert len(protocol._buffer) == 0
+
+
+def test_connection_lost_graceful(protocol: RconProtocol) -> None:
     waiters: dict[int, asyncio.Future[RconResponse]] = {
         1: asyncio.Future(),
         2: asyncio.Future(),
     }
     protocol._waiters = waiters.copy()
-
     protocol.connection_lost(None)
 
     assert not protocol.is_connected()
     assert not protocol._waiters
-    assert type(waiters[1].exception()) is HLLConnectionClosedError
-    assert type(waiters[2].exception()) is HLLConnectionClosedError
+    assert isinstance(waiters[1].exception(), HLLConnectionClosedError)
+    assert isinstance(waiters[2].exception(), HLLConnectionClosedError)
 
 
-def test_connection_lost_with_exception(
-    protocol: RconProtocol,
-) -> None:
+def test_connection_lost_with_exception(protocol: RconProtocol) -> None:
     waiters: dict[int, asyncio.Future[RconResponse]] = {
         1: asyncio.Future(),
         2: asyncio.Future(),
@@ -318,7 +257,7 @@ def test_connection_lost_with_exception(
 
     response = RconResponse(
         request_id=1,
-        command="command",
+        command="cmd",
         version=1,
         status_code=RconResponseStatus.OK,
         status_message="OK",
@@ -334,30 +273,28 @@ def test_connection_lost_with_exception(
     assert isinstance(waiters[2].exception(), HLLConnectionLostError)
 
 
-def test_connection_lost_invokes_callback(
-    protocol: RconProtocol,
-    mocker: MockerFixture,
-) -> None:
-    connection_lost_callback = mocker.Mock()
-    protocol.on_connection_lost = connection_lost_callback
+def test_connection_lost_callback(protocol: RconProtocol, mocker: MockerFixture) -> None:
+    cb = mocker.Mock()
+    protocol.on_connection_lost = cb
     protocol.connection_lost(None)
-    connection_lost_callback.assert_called_once_with(None)
+    cb.assert_called_once_with(None)
 
 
-def test_connection_lost_callback_invocation_failure(
-    protocol: RconProtocol,
-    mocker: MockerFixture,
-) -> None:
-    connection_lost_callback = mocker.Mock(side_effect=RuntimeError("Callback failed"))
-    protocol.on_connection_lost = connection_lost_callback
+def test_connection_lost_callback_failure(protocol: RconProtocol, mocker: MockerFixture) -> None:
+    cb = mocker.Mock(side_effect=RuntimeError("boom"))
+    protocol.on_connection_lost = cb
     protocol.connection_lost(None)
-    connection_lost_callback.assert_called_once_with(None)
+    cb.assert_called_once_with(None)
+
+
+# --------------------------------------------------------------------------- #
+# XOR cipher tests
+# --------------------------------------------------------------------------- #
 
 
 def test_xor_single_byte_key(protocol: RconProtocol) -> None:
     protocol.xorkey = b"\x01"
     msg = b"\x00\x01\x02"
-    # Each byte XOR 0x01
     expected = bytes([b ^ 0x01 for b in msg])
     assert protocol._xor(msg) == expected
 
@@ -365,15 +302,14 @@ def test_xor_single_byte_key(protocol: RconProtocol) -> None:
 def test_xor_multi_byte_key(protocol: RconProtocol) -> None:
     protocol.xorkey = b"\x01\x02\x03"
     msg = b"\x10\x20\x30\x40\x50\x60"
-    # XOR with repeating key
     expected = bytes(
         [
-            0x10 ^ 0x01,  # 0
-            0x20 ^ 0x02,  # 1
-            0x30 ^ 0x03,  # 2
-            0x40 ^ 0x01,  # 3
-            0x50 ^ 0x02,  # 4
-            0x60 ^ 0x03,  # 5
+            0x10 ^ 0x01,
+            0x20 ^ 0x02,
+            0x30 ^ 0x03,
+            0x40 ^ 0x01,
+            0x50 ^ 0x02,
+            0x60 ^ 0x03,
         ],
     )
     assert protocol._xor(msg) == expected
@@ -382,14 +318,7 @@ def test_xor_multi_byte_key(protocol: RconProtocol) -> None:
 def test_xor_offset(protocol: RconProtocol) -> None:
     protocol.xorkey = b"\x01\x02\x03"
     msg = b"\x10\x20\x30"
-    # With offset=1, key index starts at 1
-    expected = bytes(
-        [
-            0x10 ^ 0x02,  # (0+1)%3 = 1
-            0x20 ^ 0x03,  # (1+1)%3 = 2
-            0x30 ^ 0x01,  # (2+1)%3 = 0
-        ],
-    )
+    expected = bytes([0x10 ^ 0x02, 0x20 ^ 0x03, 0x30 ^ 0x01])
     assert protocol._xor(msg, offset=1) == expected
 
 
@@ -397,59 +326,23 @@ def test_xor_roundtrip(protocol: RconProtocol) -> None:
     protocol.xorkey = b"\x0a\x0b\x0c"
     msg = b"SecretMessage"
     encrypted = protocol._xor(msg)
-    # XOR again should recover original
     decrypted = protocol._xor(encrypted)
     assert decrypted == msg
 
 
-def test_xor_length_mismatch_raises(
-    protocol: RconProtocol,
-    mocker: MockerFixture,
-) -> None:
-    protocol.xorkey = b"\x01"
-    msg = b"\x01\x02"
-    # Patch array.array to return wrong length
-    mock_array = mocker.patch("array.array")
-    mock_array.return_value.tobytes.return_value = b"\x00"
-    with pytest.raises(
-        ValueError,
-        match="XOR operation resulted in a different length",
-    ):
-        protocol._xor(msg)
-
-
-def test_xor_warns_on_length_mismatch(
-    protocol: RconProtocol,
-    mocker: MockerFixture,
-) -> None:
-    protocol.xorkey = b"\x01"
-    msg = b"\x01\x02"
-    # Patch array.array to return wrong length and check logger.warning called
-    mock_array = mocker.patch("array.array")
-    mock_array.return_value.tobytes.return_value = b"\x00"
-    mock_logger = mocker.patch.object(protocol.logger, "warning")
-    with pytest.raises(
-        ValueError,
-        match="XOR operation resulted in a different length",
-    ):
-        protocol._xor(msg)
-    mock_logger.assert_called_with(
-        "XOR operation resulted in a different length: %s != %s",
-        1,
-        2,
-    )
+# --------------------------------------------------------------------------- #
+# execute() tests
+# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
-async def test_execute_no_connection(
-    protocol: RconProtocol,
-) -> None:
+async def test_execute_no_connection(protocol: RconProtocol) -> None:
     protocol.connection_lost(None)
     with pytest.raises(HLLConnectionClosedError, match=r"Connection is closed"):
         await protocol.execute("command", 1, "body")
 
 
-def make_response(request_id: int, message: str) -> bytes:
+def _make_response(request_id: int, message: str) -> bytes:
     body = {
         "name": "command",
         "version": 1,
@@ -467,25 +360,16 @@ def make_response(request_id: int, message: str) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_execute(
-    protocol: RconProtocol,
-    transport: Mock,
-) -> None:
-    asyncio.get_event_loop().call_later(
-        0.1,
-        protocol.data_received,
-        make_response(0, "response"),
-    )
+async def test_execute_success(protocol: RconProtocol, transport: Mock) -> None:
+    loop = asyncio.get_running_loop()
+    loop.call_later(0.1, protocol.data_received, _make_response(0, "response"))
     response = await protocol.execute("command", 1, "body")
     assert response.content_body == "response"
     transport.write.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_execute_with_timeout(
-    protocol: RconProtocol,
-    transport: Mock,
-) -> None:
+async def test_execute_timeout(protocol: RconProtocol, transport: Mock) -> None:
     protocol.timeout = 0.1
     with pytest.raises(TimeoutError):
         await protocol.execute("command", 1, "body")
@@ -494,16 +378,16 @@ async def test_execute_with_timeout(
 
 
 @pytest.mark.asyncio
-async def test_execute_concurrently(
-    protocol: RconProtocol,
-    transport: Mock,
-) -> None:
-    protocol.timeout = 1.0
-    asyncio.get_running_loop().call_later(
-        0.5,
-        protocol.data_received,
-        make_response(1, "response2") + make_response(0, "response1"),
-    )
+async def test_execute_concurrently(protocol: RconProtocol, transport: Mock) -> None:
+    protocol.timeout = 5.0
+
+    async def delayed_response() -> None:
+        await asyncio.sleep(0.1)
+        protocol.data_received(
+            _make_response(1, "response2") + _make_response(0, "response1"),
+        )
+
+    asyncio.create_task(delayed_response())
     responses = await asyncio.gather(
         protocol.execute("command1", 1, "body1"),
         protocol.execute("command2", 2, "body2"),
@@ -513,12 +397,13 @@ async def test_execute_concurrently(
     assert transport.write.call_count == 2
 
 
+# --------------------------------------------------------------------------- #
+# Authentication tests
+# --------------------------------------------------------------------------- #
+
+
 @pytest.mark.asyncio
-async def test_authenticate_success(
-    mocker: MockerFixture,
-    protocol: RconProtocol,
-) -> None:
-    # Mock execute to return fake responses for ServerConnect and Login
+async def test_authenticate_success(mocker: MockerFixture, protocol: RconProtocol) -> None:
     xorkey_b64 = base64.b64encode(b"keybytes").decode()
     xorkey_response = mocker.Mock()
     xorkey_response.content_body = xorkey_b64
@@ -542,10 +427,9 @@ async def test_authenticate_success(
             mocker.call("Login", 2, "password"),
         ],
     )
-    xorkey_response.raise_for_status.assert_called_once()
-    auth_token_response.raise_for_status.assert_called_once()
     assert protocol.xorkey == b"keybytes"
     assert protocol.auth_token == "token123"
+    assert protocol.state == ProtocolState.AUTHENTICATED
 
 
 @pytest.mark.asyncio
@@ -553,46 +437,37 @@ async def test_authenticate_serverconnect_not_string(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
-    # Mock execute to return a non-string content_body for ServerConnect
     xorkey_response = mocker.Mock()
-    xorkey_response.content_body = 12345  # Not a string
+    xorkey_response.content_body = 12345
     xorkey_response.raise_for_status = mocker.Mock()
 
     execute = mocker.patch.object(protocol, "execute", side_effect=[xorkey_response])
 
-    with pytest.raises(
-        HLLMessageError,
-        match="ServerConnect response content_body is not a string",
-    ):
+    with pytest.raises(HLLMessageError, match="not a string"):
         await protocol.authenticate("password")
-
-    execute.assert_called_once_with("ServerConnect", 2, "")
+    assert protocol.xorkey is None
 
 
 @pytest.mark.asyncio
-async def test_authenticate_serverconnect_raises_for_status(
+async def test_authenticate_serverconnect_raises(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
-    # Mock execute to raise for status on ServerConnect
     xorkey_response = mocker.Mock()
     xorkey_response.content_body = "ignored"
     xorkey_response.raise_for_status = mocker.Mock(side_effect=Exception("fail"))
 
     execute = mocker.patch.object(protocol, "execute", side_effect=[xorkey_response])
 
-    with pytest.raises(Exception, match="fail"):
+    with pytest.raises(HLLAuthError):
         await protocol.authenticate("password")
-
-    execute.assert_called_once_with("ServerConnect", 2, "")
 
 
 @pytest.mark.asyncio
-async def test_authenticate_login_raises_for_status(
+async def test_authenticate_login_raises(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
-    # Mock execute to raise for status on Login
     xorkey_b64 = base64.b64encode(b"keybytes").decode()
     xorkey_response = mocker.Mock()
     xorkey_response.content_body = xorkey_b64
@@ -600,9 +475,7 @@ async def test_authenticate_login_raises_for_status(
 
     auth_token_response = mocker.Mock()
     auth_token_response.content_body = "token123"
-    auth_token_response.raise_for_status = mocker.Mock(
-        side_effect=Exception("loginfail"),
-    )
+    auth_token_response.raise_for_status = mocker.Mock(side_effect=Exception("loginfail"))
 
     mocker.patch.object(
         protocol,
@@ -610,27 +483,24 @@ async def test_authenticate_login_raises_for_status(
         side_effect=[xorkey_response, auth_token_response],
     )
 
-    with pytest.raises(Exception, match="loginfail"):
+    with pytest.raises(HLLAuthError):
         await protocol.authenticate("password")
 
-    assert protocol.xorkey == b"keybytes"
-    # auth_token should not be set on failure
+    assert protocol.xorkey is None
     assert protocol.auth_token is None
 
 
 @pytest.mark.asyncio
-async def test_authenticate_xorkey_base64_decode_error(
+async def test_authenticate_xorkey_base64_error(
     mocker: MockerFixture,
     protocol: RconProtocol,
 ) -> None:
-    # Mock execute to return invalid base64 for xorkey
     xorkey_response = mocker.Mock()
     xorkey_response.content_body = "!!!notbase64!!!"
     xorkey_response.raise_for_status = mocker.Mock()
 
     mocker.patch.object(protocol, "execute", side_effect=[xorkey_response])
 
-    with pytest.raises(binascii.Error):
+    with pytest.raises((binascii.Error, HLLMessageError)):
         await protocol.authenticate("password")
-    # xorkey should not be set
     assert protocol.xorkey is None

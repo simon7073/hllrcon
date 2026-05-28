@@ -1,3 +1,7 @@
+"""Auto-reconnecting RCON client."""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
@@ -8,15 +12,16 @@ from typing_extensions import override
 
 from hllrcon.client import RconClient
 from hllrcon.connection import RconConnection
-from hllrcon.exceptions import HLLConnectionClosedError
+from hllrcon.exceptions import HLLConnectionClosedError, HLLConnectionError
 
 
 class Rcon(RconClient):
-    """An inferface for connecting to an RCON server.
+    """An auto-reconnecting interface for an RCON server.
 
-    This class will (re)connect to the RCON server on-demand. Only when no connection is
-    available at the time of executing a command will a new connection be attempted to
-    be established.
+    This client maintains a single active connection and transparently
+    re-establishes it when transient failures occur (up to
+    ``reconnect_after_failures`` consecutive errors). It is safe to use from
+    multiple coroutines concurrently.
     """
 
     def __init__(
@@ -26,25 +31,25 @@ class Rcon(RconClient):
         password: str,
         logger: logging.Logger | None = None,
         reconnect_after_failures: int = 3,
+        heartbeat_interval: float = 0.0,
     ) -> None:
         """Initialize a new `Rcon` instance.
 
         Parameters
         ----------
-        host : str
-            The hostname or IP address of the RCON server.
-        port : int
-            The port of the RCON server.
-        password : str
-            The password for the RCON server.
-        logger : logging.Logger | None, optional
-            A logger instance for logging messages, by default None. If None,
-            `logging.getLogger(__name__)` is used.
-        reconnect_after_failures : int, optional
-            After how many failed attempts to execute a command the active connection is
-            disposed and a new connection is established on the next command execution.
-            If the server responds to a request, the failure count is reset, even if the
-            server returned an error. Set to 0 to disable, by default 3.
+        host :
+            Hostname or IP address.
+        port :
+            RCON port.
+        password :
+            Server password.
+        logger :
+            Optional logger.
+        reconnect_after_failures :
+            Number of consecutive failures before the connection is torn down
+            and rebuilt on the next command. ``0`` disables auto-reconnect.
+        heartbeat_interval :
+            If > 0, passes this through to the underlying protocol.
 
         """
         super().__init__()
@@ -52,10 +57,13 @@ class Rcon(RconClient):
         self.port = port
         self.password = password
         self.reconnect_after_failures = max(0, reconnect_after_failures)
+        self.heartbeat_interval = max(0.0, float(heartbeat_interval))
 
         self._logger = logger
-        self._connection: asyncio.Future[RconConnection] | None = None
+        self._connection: RconConnection | None = None
         self._failure_count = 0
+        self._lock = asyncio.Lock()
+        self._connecting: asyncio.Future[RconConnection] | None = None
 
     @property
     def logger(self) -> logging.Logger:
@@ -66,54 +74,56 @@ class Rcon(RconClient):
         self._logger = value
 
     async def _get_connection(self) -> RconConnection:
-        if (
-            self._connection
-            and self._connection.done()
-            and (
-                self._connection.exception()
-                or not self._connection.result().is_connected()
-            )
-        ):
-            self._connection = None
+        """Return the active connection, creating one if necessary."""
+        while True:
+            async with self._lock:
+                if self._connection is not None and self._connection.is_connected():
+                    return self._connection
 
-        if self._connection is None:
-            self._connection = asyncio.Future()
+                if self._connecting is None:
+                    # We are the one responsible for establishing the connection.
+                    self._connecting = asyncio.get_running_loop().create_future()
+                    break
+
+                # Another coroutine is already connecting — wait on its future.
+                future = self._connecting
+
+            # Await outside the lock so multiple waiters can share the same
+            # connection attempt without serialising on the mutex.
             try:
-                connection = await RconConnection.connect(
-                    host=self.host,
-                    port=self.port,
-                    password=self.password,
-                    logger=self._logger,
-                )
-                self._connection.set_result(connection)
-            except Exception as e:
-                old_connection = self._connection
-                self._connection = None
+                return await future
+            except Exception:
+                # The other attempt failed; loop around and retry.
+                continue
 
-                # Set the result, in case anyone is awaiting it
-                old_connection.set_exception(e)
-                # We grab the result in case noone is awaiting it, to avoid "Future
-                # exception was never retrieved" warnings
-                old_connection.result()
-                raise  # pragma: no cover
-            else:
-                return connection
-
-        elif not self._connection.done():
-            return await asyncio.shield(self._connection)
-
+        # We own self._connecting — perform the actual connection attempt.
+        try:
+            connection = await RconConnection.connect(
+                host=self.host,
+                port=self.port,
+                password=self.password,
+                logger=self._logger,
+                heartbeat_interval=self.heartbeat_interval,
+            )
+        except Exception as exc:
+            async with self._lock:
+                if self._connecting is not None:
+                    self._connecting.set_exception(exc)
+                    self._connecting = None
+            raise
         else:
-            return self._connection.result()
+            async with self._lock:
+                self._connection = connection
+                if self._connecting is not None:
+                    self._connecting.set_result(connection)
+                    self._connecting = None
+                self._failure_count = 0
+            return connection
 
     @override
     def is_connected(self) -> bool:
-        return (
-            self._connection is not None
-            and not self._connection.cancelled()
-            and self._connection.done()
-            and not self._connection.exception()
-            and self._connection.result().is_connected()
-        )
+        conn = self._connection
+        return conn is not None and conn.is_connected()
 
     @override
     @asynccontextmanager
@@ -130,15 +140,17 @@ class Rcon(RconClient):
 
     @override
     def disconnect(self) -> None:
-        if self._connection:
-            if self._connection.done():
-                if not self._connection.exception():
-                    self._connection.result().disconnect()
-            else:
-                self._connection.set_exception(HLLConnectionClosedError())
+        """Disconnect and reset all internal state.
 
+        Idempotent.
+        """
+        if self._connection is not None:
+            self._connection.disconnect()
         self._connection = None
         self._failure_count = 0
+        if self._connecting is not None and not self._connecting.done():
+            self._connecting.set_exception(HLLConnectionClosedError("Client disconnected"))
+        self._connecting = None
 
     @override
     async def execute(
@@ -147,11 +159,44 @@ class Rcon(RconClient):
         version: int,
         body: str | dict[str, Any] = "",
     ) -> str:
+        """Execute a command, automatically reconnecting on transient failure.
+
+        Parameters
+        ----------
+        command :
+            Command name.
+        version :
+            API version.
+        body :
+            Payload.
+
+        Returns
+        -------
+        str
+            Response body.
+
+        """
         connection = await self._get_connection()
 
         try:
-            return await connection.execute(command, version, body)
-        except (TimeoutError, OSError):
+            result = await connection.execute(command, version, body)
+        except (TimeoutError, OSError) as exc:
+            self._failure_count += 1
+            self.logger.debug(
+                "Command %s failed (%s), failure_count=%s/%s",
+                command,
+                exc,
+                self._failure_count,
+                self.reconnect_after_failures,
+            )
+            if (
+                self.reconnect_after_failures > 0
+                and self._failure_count >= self.reconnect_after_failures
+            ):
+                self.disconnect()
+            raise
+        except HLLConnectionError:
+            # Any explicit connection error also counts as a failure.
             self._failure_count += 1
             if (
                 self.reconnect_after_failures > 0
@@ -159,3 +204,8 @@ class Rcon(RconClient):
             ):
                 self.disconnect()
             raise
+        else:
+            # Reset failure counter on *any* successful round-trip, even if the
+            # server returned a command-level error (that is handled by the caller).
+            self._failure_count = 0
+            return result

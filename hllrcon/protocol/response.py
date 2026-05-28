@@ -1,8 +1,12 @@
+"""RCONv2 response decoding."""
+
+from __future__ import annotations
+
 import json
 from enum import IntEnum
 from typing import Any, Self
 
-from hllrcon.exceptions import HLLCommandError
+from hllrcon.exceptions import HLLCommandError, HLLMessageError, HLLProtocolError
 
 
 class RconResponseStatus(IntEnum):
@@ -22,7 +26,16 @@ class RconResponseStatus(IntEnum):
 
 
 class RconResponse:
-    """Represents a RCON response."""
+    """Represents a single RCON response."""
+
+    __slots__ = (
+        "request_id",
+        "name",
+        "version",
+        "status_code",
+        "status_message",
+        "content_body",
+    )
 
     def __init__(
         self,
@@ -33,7 +46,7 @@ class RconResponse:
         status_message: str,
         content_body: str,
     ) -> None:
-        """Initializes a new RCON response.
+        """Initialize a new RCON response.
 
         Parameters
         ----------
@@ -87,38 +100,78 @@ class RconResponse:
             content = self.content_dict
         except (json.JSONDecodeError, TypeError):
             content = self.content_body
-
         return f"{self.status_code} {self.name} {content}"
+
+    def __repr__(self) -> str:
+        return (
+            f"<{self.__class__.__name__} id={self.request_id} "
+            f"cmd={self.name!r} status={self.status_code}>"
+        )
 
     @classmethod
     def unpack(cls, request_id: int, body_encoded: bytes) -> Self:
-        """Unpacks a RCON response from its bytes representation.
+        """Unpack a RCON response from its bytes representation.
 
         Parameters
         ----------
         request_id : int
             The ID of the request this response corresponds to.
         body_encoded : bytes
-            The encoded body of the response, which is expected to be a JSON string.
+            The encoded body of the response, expected to be a UTF-8 JSON string.
 
         Returns
         -------
         RconResponse
             The unpacked RCON response object.
 
+        Raises
+        ------
+        HLLProtocolError
+            If the payload is not valid JSON or is missing required fields.
+        HLLMessageError
+            If a required field is of an unexpected type.
+
         """
-        body = json.loads(body_encoded)
+        try:
+            body = json.loads(body_encoded)
+        except json.JSONDecodeError as exc:
+            msg = f"Failed to decode response JSON: {exc}"
+            raise HLLProtocolError(msg) from exc
+
+        if not isinstance(body, dict):
+            msg = f"Response body must be a JSON object, got {type(body).__name__}"
+            raise HLLMessageError(msg)
+
+        def _get(key: str, expected_type: type) -> Any:
+            value = body.get(key)
+            if value is None:
+                msg = f"Missing required field '{key}' in response"
+                raise HLLProtocolError(msg)
+            if not isinstance(value, expected_type):
+                msg = (
+                    f"Field '{key}' expected {expected_type.__name__}, "
+                    f"got {type(value).__name__}"
+                )
+                raise HLLMessageError(msg)
+            return value
+
+        try:
+            status_code = RconResponseStatus(int(_get("statusCode", (int, float))))
+        except ValueError as exc:
+            msg = f"Invalid statusCode in response: {exc}"
+            raise HLLProtocolError(msg) from exc
+
         return cls(
             request_id=request_id,
-            command=str(body["name"]),
-            version=int(body["version"]),
-            status_code=RconResponseStatus(int(body["statusCode"])),
-            status_message=str(body["statusMessage"]),
-            content_body=body["contentBody"],
+            command=str(_get("name", str)),
+            version=int(_get("version", (int, float))),
+            status_code=status_code,
+            status_message=str(_get("statusMessage", str)),
+            content_body=body.get("contentBody", ""),
         )
 
     def raise_for_status(self) -> None:
-        """Raises an exception if the response status is not OK.
+        """Raise an exception if the response status is not OK.
 
         Raises
         ------
@@ -127,4 +180,9 @@ class RconResponse:
 
         """
         if self.status_code != RconResponseStatus.OK:
-            raise HLLCommandError(self.status_code, self.status_message)
+            raise HLLCommandError(
+                self.status_code,
+                self.status_message,
+                command=self.name,
+                response_body=self.content_body,
+            )

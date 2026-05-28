@@ -1,41 +1,36 @@
+"""Abstract base class for RCON clients."""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from hllrcon.commands import RconCommands
 
+class RconClient(ABC):
+    """Abstract base class for auto-reconnecting RCON clients.
 
-class RconClient(RconCommands, ABC):
-    """Abstract base class for RCON clients.
-
-    This class defines the interface for RCON clients, including methods for
-    connecting, disconnecting, sending commands.
+    Implementations must provide connection lifecycle management. High-level
+    command wrappers live in :class:`hllrcon.commands.RconCommands` and its
+    subclasses.
     """
 
     @abstractmethod
     def is_connected(self) -> bool:
-        """Check if the client is connected to the RCON server.
-
-        Returns
-        -------
-        bool
-            True if connected, False otherwise.
-
-        """
+        """Return ``True`` if the client is connected to the RCON server."""
 
     @abstractmethod
     @asynccontextmanager
     async def connect(self) -> AsyncGenerator[None]:
-        """Establish a connection to the RCON server."""
-        yield
+        """Establish a connection, yielding once ready.
+
+        The connection is torn down when the context manager exits.
+        """
+        yield  # type: ignore[misc]
 
     @abstractmethod
     async def wait_until_connected(self) -> None:
-        """Wait until the client is connected to the RCON server.
-
-        This might be useful to verify that a connection can be established before
-        continuing with other operations.
-        """
+        """Block until a connection has been established."""
 
     @abstractmethod
     def disconnect(self) -> None:
