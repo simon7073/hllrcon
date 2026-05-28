@@ -1,35 +1,32 @@
 <h1 align="center"><code>hllrcon</code> - Hell Let Loose RCON</h1>
 
 <p align="center">
-<a href="https://github.com/timraay/hllrcon/releases" target="_blank">
-    <img src="https://img.shields.io/github/release/timraay/hllrcon.svg" alt="Release">
+<a href="https://github.com/simon7073/hllrcon/releases" target="_blank">
+    <img src="https://img.shields.io/github/release/simon7073/hllrcon.svg" alt="Release">
 </a>
 <a href="https://pypi.python.org/pypi/hllrcon" target="_blank">
     <img src="https://img.shields.io/pypi/v/hllrcon.svg" alt=PyPI>
 </a>
-<a href="https://codecov.io/gh/timraay/hllrcon" target="_blank">
-    <img src="https://codecov.io/gh/timraay/hllrcon/graph/badge.svg?token=E60H3U7RQA" alt="Branch Coverage">
+<a href="https://github.com/simon7073/hllrcon/blob/master/LICENSE" target="_blank">
+    <img src="https://img.shields.io/github/license/simon7073/hllrcon.svg" alt="License">
 </a>
-<a href="https://github.com/timraay/hllrcon/blob/main/LICENSE" target="_blank">
-    <img src="https://img.shields.io/github/license/timraay/hllrcon.svg" alt="License">
+<a href="https://github.com/simon7073/hllrcon/graphs/contributors" target="_blank">
+    <img src="https://img.shields.io/github/contributors/simon7073/hllrcon.svg" alt="GitHub contributors">
 </a>
-<a href="https://github.com/timraay/hllrcon/graphs/contributors" target="_blank">
-    <img src="https://img.shields.io/github/contributors/timraay/hllrcon.svg" alt="GitHub contributors">
+<a href="https://github.com/simon7073/hllrcon/issues" target="_blank">
+    <img src="https://img.shields.io/github/issues/simon7073/hllrcon.svg" alt="GitHub issues">
 </a>
-<a href="https://github.com/timraay/hllrcon/issues" target="_blank">
-    <img src="https://img.shields.io/github/issues/timraay/hllrcon.svg" alt="GitHub issues">
+<a href="https://github.com/simon7073/hllrcon/pulls" target="_blank">
+    <img src="https://img.shields.io/github/issues-pr/simon7073/hllrcon.svg" alt="GitHub pull requests">
 </a>
-<a href="https://github.com/timraay/hllrcon/pulls" target="_blank">
-    <img src="https://img.shields.io/github/issues-pr/timraay/hllrcon.svg" alt="GitHub pull requests">
-</a>
-<a href="https://github.com/timraay/hllrcon/stargazers" target="_blank">
-    <img src="https://img.shields.io/github/stars/timraay/hllrcon.svg" alt="GitHub stars">
+<a href="https://github.com/simon7073/hllrcon/stargazers" target="_blank">
+    <img src="https://img.shields.io/github/stars/simon7073/hllrcon.svg" alt="GitHub stars">
 </a>
 </p>
 
 ---
 
-**hllrcon** is an asynchronous Python implementation of the [Hell Let Loose](https://www.hellletloose.com/game/hll) RCON protocol.  
+**hllrcon** is an asynchronous Python implementation of the [Hell Let Loose](https://www.hellletloose.com/game/hll) RCON protocol.
 It allows you to interact with your HLL servers programmatically, supporting modern Python async features and robust error handling.
 
 ## Features
@@ -47,6 +44,7 @@ pip install hllrcon
 ```
 
 ## Usage
+
 ```py
 import asyncio
 from hllrcon import Rcon, Layer
@@ -68,7 +66,6 @@ async def main():
     # Close the connection
     rcon.disconnect()
 
-
     # Alternatively, use the context manager interface to avoid
     # having to manually disconnect.
     async with rcon.connect():
@@ -81,7 +78,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-For integration of synchronous applications, a `SyncRcon` class is provided.
+For synchronous applications, a `SyncRcon` class is provided.
 
 ```py
 from hllrcon.sync import SyncRcon
@@ -100,7 +97,7 @@ with rcon.connect():
 The library contains a swathe of details about in-game maps, factions, weapons, vehicles, and more. Below is just an example of what it might be used for.
 
 ```py
-from hllron import Weapon
+from hllrcon import Weapon
 
 # Find a weapon by its ID
 weapon_id = "COAXIAL M1919 [Stuart M5A1]"
@@ -113,6 +110,7 @@ if weapon.vehicle:
             print("This weapon belongs to the", seat.type.name, "seat")
             break
 ```
+
 ```py
 from hllrcon import Rcon, Map, Team
 
@@ -148,7 +146,7 @@ print("Allied cap weight:", strength[Team.ALLIES])
 print("Axis cap weight:", strength[Team.AXIS])
 ```
 
-# Versioning
+## Versioning
 
 Hell Let Loose (referred to as "the game") is a constantly evolving game, and game updates might alter its RCON interfaces in ways that are not backward-compatible.
 This affects any tools and libraries that depend on it, including this library and any software utilizing it.
@@ -167,6 +165,6 @@ However, there are differences in the way each of the four components are define
 When specifying `hllrcon` as a dependency, it is recommended to pin the `MINOR` version but not the `PATCH` version. `MINOR` versions are still backwards-incompatible
 in that they require the game server to be updated. `MINOR` versions may depend on upcoming, unreleased game version.
 
-# License
+## License
 
-This project is licensed under the MIT License. See [`LICENSE`](/LICENSE) for details.
+This project is licensed under the MIT License. See [`LICENSE`](https://github.com/simon7073/hllrcon/blob/master/LICENSE) for details.
